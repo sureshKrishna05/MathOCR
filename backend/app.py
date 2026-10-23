@@ -26,7 +26,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import pypdfium2 as pdfium
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -39,6 +39,8 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from backend import model_store
+from backend.document import DisplayEquation, Document
+from backend.docx_export import build_docx_from_document
 
 # Engine caches must be redirected below the MathOCR model folder before any
 # ML package gets imported, otherwise they fall back to scattered defaults.
@@ -175,11 +177,12 @@ class EquationResult(BaseModel):
 
 
 class DocumentResult(BaseModel):
-    """One reconstructed page of text + math, as editable Markdown."""
+    """One reconstructed page of text + math, as editable Markdown and structured Document."""
 
     source: str
     page: int | None = None
     markdown: str
+    document: dict[str, Any] | None = None
 
 
 class OcrResponse(BaseModel):
@@ -191,15 +194,17 @@ class OcrResponse(BaseModel):
 
 
 class DocxRequest(BaseModel):
-    """Reviewed content submitted for Pandoc conversion.
+    """Reviewed content submitted for Word DOCX conversion.
 
     Provide ``markdown`` for a full document (text + equations, from document
-    mode) or ``equations`` for a stack of display equations only.
+    mode), ``equations`` for a stack of display equations only, or ``document``
+    for a structured document representation.
     """
 
     title: str = Field(default="MathOCR equations", max_length=120)
     equations: list[str] = Field(default_factory=list, max_length=500)
     markdown: str | None = Field(default=None, max_length=200_000)
+    document: dict[str, Any] | None = Field(default=None)
     # When true the file is written straight into the user's Downloads folder
     # (desktop app) instead of streamed back for the browser to save.
     save_to_downloads: bool = False
@@ -222,8 +227,8 @@ class DocxRequest(BaseModel):
         return markdown
 
     def require_content(self) -> None:
-        if not self.equations and not (self.markdown and self.markdown.strip()):
-            raise ValueError("Provide equations or markdown to export")
+        if not self.equations and not (self.markdown and self.markdown.strip()) and not self.document:
+            raise ValueError("Provide equations, markdown, or a structured document to export")
 
 
 class TextExportRequest(BaseModel):
@@ -394,8 +399,14 @@ def recognize_file(
                     )
                 )
             if outcome.markdown:
+                doc_dict = outcome.document.to_dict() if outcome.document else None
                 documents.append(
-                    DocumentResult(source=filename, page=page_ref, markdown=outcome.markdown)
+                    DocumentResult(
+                        source=filename,
+                        page=page_ref,
+                        markdown=outcome.markdown,
+                        document=doc_dict,
+                    )
                 )
             if mode == "document" and not outcome.text_available:
                 text_missing = True
@@ -919,35 +930,28 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
         raise HTTPException(status_code=503, detail="Pandoc is not installed or is not on PATH")
 
     temp_dir = tempfile.mkdtemp(prefix="mathocr-")
-    markdown_path = Path(temp_dir, "equations.md")
     output_path = Path(temp_dir, "equations.docx")
-    markdown_path.write_text(markdown_document(request), encoding="utf-8")
+
+    if request.document:
+        doc = Document.from_dict(request.document)
+    elif request.markdown and request.markdown.strip():
+        doc = Document.from_markdown(request.markdown, title=request.title)
+    else:
+        elements = [DisplayEquation(latex=equation) for equation in request.equations]
+        doc = Document(title=request.title, elements=elements)
 
     try:
-        completed = await run_in_threadpool(
-            subprocess.run,
-            [
-                pandoc,
-                "--from=markdown+tex_math_dollars",
-                "--to=docx",
-                "--standalone",
-                str(markdown_path),
-                "--output",
-                str(output_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
+        export_warnings = await run_in_threadpool(
+            build_docx_from_document, doc, output_path, pandoc
         )
-    except subprocess.TimeoutExpired as exc:
+    except Exception as exc:
         remove_tree(temp_dir)
-        raise HTTPException(status_code=504, detail="Pandoc export timed out") from exc
+        logger.exception("Word export failed")
+        raise HTTPException(status_code=422, detail=f"Word export failed: {exc}") from exc
 
-    if completed.returncode != 0 or not output_path.exists():
+    if not output_path.exists() or output_path.stat().st_size == 0:
         remove_tree(temp_dir)
-        detail = completed.stderr.strip()[-600:] or "Pandoc did not create a document"
-        raise HTTPException(status_code=422, detail=f"Word export failed: {detail}")
+        raise HTTPException(status_code=422, detail="Word export did not create a document")
 
     filename = export_filename(request.title, "docx")
     if request.save_to_downloads:
@@ -958,7 +962,12 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
         finally:
             remove_tree(temp_dir)
         return JSONResponse(
-            {"saved": True, "path": str(destination), "filename": destination.name}
+            {
+                "saved": True,
+                "path": str(destination),
+                "filename": destination.name,
+                "warnings": export_warnings,
+            }
         )
 
     return FileResponse(

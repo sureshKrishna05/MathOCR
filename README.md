@@ -95,6 +95,44 @@ python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
 
 Then open <http://127.0.0.1:8000>. Install [Pandoc](https://pandoc.org/installing.html) for Word export and [Tesseract](https://tesseract-ocr.github.io/) (+ Greek data) for document-mode text.
 
+### Native Word (OMML) & Structured Document Export
+
+MathOCR exports documents and equations directly into editable Microsoft Word (`.docx`) files with full support for:
+- **Native OMML Equations**: Formulas are converted into Office Math Markup Language (`<m:oMath>` and `<m:oMathPara>`), making them directly selectable and editable in Microsoft Word's equation editor (not images or raw text).
+- **Fractions, Superscripts, Integrals, Roots, Matrices, and Greek letters**: Comprehensive support for academic mathematical notation.
+- **Genuine Word Tables**: Reconstructed tables use real Word table XML (`<w:tbl>`, `<w:tr>`, `<w:tc>`) with editable cells and embedded formulas.
+- **Document Structure**: Section headings, paragraphs, bulleted and numbered lists, and reading order are preserved.
+- **Error Handling**: If a mathematical expression contains unsupported or malformed syntax, a clear warning is generated and an explicit placeholder is inserted without leaking raw LaTeX into ordinary text.
+
+#### Setup & Offline Operation
+
+Once dependencies and models are installed locally, all OCR recognition, mathematical formula conversion, and DOCX generation operate **100% offline** on your computer. No data is ever sent to external cloud APIs.
+
+```bash
+# Install dependencies including python-docx and lxml
+pip install -r backend/requirements.txt
+
+# Start the application server locally
+python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
+```
+
+#### Running Tests
+
+Automated tests cover equation conversion, Word tables, mixed academic documents, offline operation, and LibreOffice compatibility:
+
+```bash
+# Run the complete test suite
+pytest tests/ -v
+
+# Run the structured DOCX export tests specifically
+pytest tests/test_structured_docx.py -v
+```
+
+#### Known Limitations
+
+- Complex multi-page merged table cells across page boundaries require manual verification.
+- Heavily distorted, low-contrast scans or non-standard mathematical shorthands may require formula review in the editor before final export.
+
 ### Build the desktop installers
 
 On each target operating system:

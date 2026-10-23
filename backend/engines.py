@@ -304,6 +304,40 @@ class TesseractTextEngine:
         return lines
 
 
+class RapidOcrTextEngine:
+    """Document text recognition through RapidOCR (ONNX runtime, standalone)."""
+
+    id = "rapidocr"
+
+    def __init__(self) -> None:
+        _require("rapidocr", "rapidocr")
+        import numpy as np
+        from rapidocr import RapidOCR
+
+        self._np = np
+        self._engine = RapidOCR()
+
+    def read_lines(self, image: Image.Image) -> list[TextLine]:
+        rgb = image.convert("RGB")
+        res = self._engine(self._np.array(rgb))
+        lines: list[TextLine] = []
+        if res.txts:
+            for box, text, score in zip(res.boxes, res.txts, res.scores):
+                stripped = text.strip()
+                if not stripped:
+                    continue
+                xs = [float(pt[0]) for pt in box]
+                ys = [float(pt[1]) for pt in box]
+                lines.append(
+                    TextLine(
+                        box=Box(min(xs), min(ys), max(xs), max(ys)),
+                        text=stripped,
+                        confidence=float(score),
+                    )
+                )
+        return lines
+
+
 class NougatEngine:
     """Optional Meta Nougat document recognizer (English papers, CC-BY-NC).
 
@@ -369,11 +403,11 @@ def resolve_math_engines(selection: str) -> list[str]:
 
 
 def text_engine_available() -> bool:
-    """True when page text can be read (pytesseract present and a binary found)."""
+    """True when page text can be read (Tesseract binary present or RapidOCR installed)."""
 
-    if importlib.util.find_spec("pytesseract") is None:
-        return False
-    return find_tesseract_binary() is not None
+    if importlib.util.find_spec("pytesseract") is not None and find_tesseract_binary() is not None:
+        return True
+    return importlib.util.find_spec("rapidocr") is not None
 
 
 def nougat_available() -> bool:
@@ -440,10 +474,15 @@ class EngineRegistry:
                 logger.info("Math-region detector loaded | elapsed=%.2fs", time.perf_counter() - started)
             return self._detector
 
-    def text_engine(self) -> TesseractTextEngine:
+    def text_engine(self) -> Any:
         with self._lock:
             if self._text_engine is None:
-                self._text_engine = TesseractTextEngine()
+                if find_tesseract_binary() is not None and importlib.util.find_spec("pytesseract") is not None:
+                    self._text_engine = TesseractTextEngine()
+                elif importlib.util.find_spec("rapidocr") is not None:
+                    self._text_engine = RapidOcrTextEngine()
+                else:
+                    self._text_engine = TesseractTextEngine()
             return self._text_engine
 
     def nougat_engine(self) -> NougatEngine:
@@ -571,6 +610,7 @@ class PageOutcome:
     regions: list[RegionResult]
     markdown: str | None = None  # present only in document mode
     text_available: bool = True  # False when page text could not be read
+    document: Any = None  # Structured Document intermediate representation
 
 
 def _overlap_fraction(inner: Box, outer: Box) -> float:
@@ -737,7 +777,9 @@ class MathPipeline:
             if all(_overlap_fraction(line.box, math_box) < 0.5 for math_box in math_boxes)
         ]
         markdown = reconstruct_markdown(kept_text, regions, image.height)
-        return PageOutcome(regions=regions, markdown=markdown)
+        from backend.document import Document
+        doc = Document.from_layout(kept_text, regions, image.height, image.width)
+        return PageOutcome(regions=regions, markdown=markdown, document=doc)
 
     def _process_with_nougat(self, image: Image.Image) -> PageOutcome:
         markdown = self._registry.nougat_engine().recognize_document(image)
@@ -745,7 +787,9 @@ class MathPipeline:
             RegionResult(latex=latex, engine="nougat", confidence=None, kind="isolated")
             for latex in extract_math(markdown)
         ]
-        return PageOutcome(regions=regions, markdown=markdown)
+        from backend.document import Document
+        doc = Document.from_markdown(markdown)
+        return PageOutcome(regions=regions, markdown=markdown, document=doc)
 
     @staticmethod
     def _region_kind(region: Box, detected: list[tuple[Box, str]]) -> str:

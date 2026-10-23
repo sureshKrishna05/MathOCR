@@ -743,7 +743,7 @@ function renderResults(shouldScroll = true) {
 
 /* ---------- document reconstruction view ---------- */
 
-// Render a small subset of Markdown (paragraphs + $inline$ / $$display$$ math)
+// Render Markdown (paragraphs + tables + headings + $inline$ / $$display$$ math)
 // into an element. No external Markdown library is needed for this preview.
 function renderMarkdownPreview(markdown, target) {
   target.replaceChildren();
@@ -751,6 +751,18 @@ function renderMarkdownPreview(markdown, target) {
   for (const block of blocks) {
     const trimmed = block.trim();
     if (!trimmed) continue;
+
+    // Headings
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch) {
+      const hLevel = headingMatch[1].length;
+      const hElem = document.createElement(`h${Math.min(hLevel + 1, 6)}`);
+      hElem.textContent = headingMatch[2];
+      target.append(hElem);
+      continue;
+    }
+
+    // Display math
     const displayMatch = trimmed.match(/^\$\$([\s\S]+?)\$\$$/);
     if (displayMatch && window.katex) {
       const wrapper = document.createElement("div");
@@ -763,6 +775,49 @@ function renderMarkdownPreview(markdown, target) {
       target.append(wrapper);
       continue;
     }
+
+    // Tables
+    if (trimmed.includes("|") && trimmed.split("\n").length >= 2) {
+      const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.every((l) => l.includes("|"))) {
+        const table = document.createElement("table");
+        table.className = "preview-table";
+        const tbody = document.createElement("tbody");
+        lines.forEach((line, idx) => {
+          if (/^\|?[\s:-|-]+\|?$/.test(line) && line.includes("-")) return;
+          const tr = document.createElement("tr");
+          let cleanLine = line;
+          if (cleanLine.startsWith("|")) cleanLine = cleanLine.slice(1);
+          if (cleanLine.endsWith("|")) cleanLine = cleanLine.slice(0, -1);
+          const cells = cleanLine.split("|");
+          cells.forEach((cell) => {
+            const cellElem = document.createElement(idx === 0 ? "th" : "td");
+            const cellText = cell.trim();
+            const parts = cellText.split(/(\$[^$]+\$)/);
+            for (const part of parts) {
+              const inline = part.match(/^\$([^$]+)\$$/);
+              if (inline && window.katex) {
+                const span = document.createElement("span");
+                try {
+                  window.katex.render(inline[1], span, { displayMode: false, throwOnError: false, strict: "ignore" });
+                } catch (_error) {
+                  span.textContent = part;
+                }
+                cellElem.append(span);
+              } else if (part) {
+                cellElem.append(document.createTextNode(part));
+              }
+            }
+            tr.append(cellElem);
+          });
+          tbody.append(tr);
+        });
+        table.append(tbody);
+        target.append(table);
+        continue;
+      }
+    }
+
     const paragraph = document.createElement("p");
     const parts = trimmed.split(/(\$[^$]+\$)/);
     for (const part of parts) {
@@ -860,7 +915,11 @@ function activeLatex() {
 // show the folder + filename so the user knows it went to Downloads.
 function savedToast(payload) {
   const path = payload && payload.path ? payload.path : "";
-  showToast(path ? t("savedTo", { path }) : t("wordCreated"));
+  if (payload && Array.isArray(payload.warnings) && payload.warnings.length > 0) {
+    showToast(path ? `${t("savedTo", { path })} (${payload.warnings.length} equation warning(s))` : t("wordCreated"));
+  } else {
+    showToast(path ? t("savedTo", { path }) : t("wordCreated"));
+  }
 }
 
 async function downloadTex() {
