@@ -3,7 +3,7 @@
 
 #define MyAppName "Qryptex"
 #define MyAppVersion "2.0.0"
-#define MyAppPublisher "Qryptex (Bharathidasan University)"
+#define MyAppPublisher "Qryptex"
 #define MyAppURL "https://qryptex.in"
 #define MyAppExeName "MathOCR.exe"
 

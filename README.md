@@ -1,8 +1,7 @@
 # Qryptex — Academic Document & Math OCR
-### 🏛️ Bharathidasan University Edition
 **Turn photos, scans, and PDFs of academic mathematics into native, editable Microsoft Word equations and LaTeX — 100% locally and privately on your computer.**
 
-Official Portal: [qryptex.in](https://qryptex.in) · Developed for **Bharathidasan University** · Core Engine: [MIT License](LICENSE)
+Official Portal: [qryptex.in](https://qryptex.in) · Core Engine: [MIT License](LICENSE)
 
 ---
 
@@ -167,6 +166,6 @@ MathOCR/
 
 ## 📜 Credits & License
 
-- **Edition**: Developed for **Bharathidasan University** · [qryptex.in](https://qryptex.in).
+- **Product**: **Qryptex** · [qryptex.in](https://qryptex.in).
 - **Core Technology**: Based on open-source MathOCR by **Bouronikos Christos** ([chrisbouronikos@gmail.com](mailto:chrisbouronikos@gmail.com)).
 - **License**: Released under the **[MIT License](LICENSE)**. Third-party components and neural model weights are attributed in [NOTICE](NOTICE).

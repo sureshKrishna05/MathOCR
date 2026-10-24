@@ -195,7 +195,7 @@ def run_desktop() -> None:
             import webview
 
             webview.create_window(
-                "Qryptex — Bharathidasan University Math OCR",
+                "Qryptex — Academic Document & Math OCR",
                 desktop_url(port),
                 width=1180,
                 height=860,

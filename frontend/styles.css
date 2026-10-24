@@ -121,18 +121,6 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.univ-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  color: #1d4ed8;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
 .brand-by {
   color: var(--muted);
   font-size: 0.68rem;
@@ -240,21 +228,6 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
   flex-wrap: wrap;
   margin-bottom: 16px;
 }
-
-.univ-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 13px;
-  border-radius: var(--radius-full);
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  color: #15803d;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.univ-icon { font-size: 0.85rem; }
 
 .eyebrow-pill {
   display: inline-flex;
@@ -990,17 +963,6 @@ h2 { font-size: clamp(1.4rem, 2.5vw, 1.85rem); }
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-.footer-univ {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: var(--radius-full);
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
-  font-size: 0.65rem;
-  font-weight: 700;
 }
 .footer-brand p { margin: 4px 0 0; font-size: 0.76rem; color: #64748b; }
 

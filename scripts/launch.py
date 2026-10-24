@@ -81,7 +81,7 @@ def serve() -> None:
     import uvicorn
 
     url = f"http://{HOST}:{PORT}"
-    print(f"\nQryptex (Bharathidasan University Edition) is starting at {url}")
+    print(f"\nQryptex is starting at {url}")
     print("Close this window (or press Ctrl+C) to stop the local engine.\n")
     threading.Timer(2.0, lambda: webbrowser.open(url)).start()
     uvicorn.run("backend.app:app", host=HOST, port=PORT, log_level="warning")

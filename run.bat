@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title Qryptex - Bharathidasan University Math OCR
+title Qryptex - Academic Document & Math OCR
 cd /d "%~dp0"
 
 echo =====================================================================
-echo   QRYPTEX - Bharathidasan University Math OCR
+echo   QRYPTEX - Academic Document & Math OCR
 echo   Official Portal: https://qryptex.in
 echo =====================================================================
 echo.

@@ -22,8 +22,8 @@ const ENGINE_SHORT_NAMES = {
 
 const translations = {
   en: {
-    pageTitle: "Qryptex — Bharathidasan University | Academic Document & Math to Word",
-    brandBy: "Bharathidasan University Edition · Math to Word",
+    pageTitle: "Qryptex — Academic Document & Math to Word",
+    brandBy: "Academic Document & Math to Word",
     refreshPage: "Refresh",
     updateTitle: "A new version is available",
     updateDetail: "Qryptex {{latest}} is available — you have {{current}}.",
@@ -165,8 +165,8 @@ const translations = {
     footerMadeWith: "made for students, teachers, and researchers",
   },
   el: {
-    pageTitle: "Qryptex — Πανεπιστήμιο Bharathidasan | Έγγραφα & Μαθηματικά σε Word",
-    brandBy: "Έκδοση Πανεπιστημίου Bharathidasan",
+    pageTitle: "Qryptex | Έγγραφα & Μαθηματικά σε Word",
+    brandBy: "Έγγραφα & Μαθηματικά σε Word",
     refreshPage: "Ανανέωση",
     updateTitle: "Διαθέσιμη νέα έκδοση",
     updateDetail: "Η έκδοση Qryptex {{latest}} είναι διαθέσιμη — έχετε την {{current}}.",
