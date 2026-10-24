@@ -85,7 +85,7 @@ FILENAME_SUFFIX = f"by {AUTHOR}"  # every exported file carries the author's nam
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 12
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
-PDF_RENDER_SCALE = 2.0  # ≈150 dpi; optimal balance of crisp OCR fidelity and fast processing speed
+PDF_RENDER_SCALE = 2.4  # ≈180 dpi; optimal balance of sharp math recognition fidelity and fast processing speed
 
 # In-app updates read the newest GitHub release and, in the packaged app, launch
 # its installer (which upgrades over the current install and relaunches).
@@ -319,7 +319,7 @@ async def read_upload(upload: UploadFile) -> tuple[str, bytes]:
 
 
 def normalized_image(data: bytes) -> Image.Image:
-    """Decode an image, apply EXIF rotation, and flatten transparency onto white."""
+    """Decode an image, apply EXIF rotation, flatten transparency onto white, and optimize contrast."""
 
     try:
         source = Image.open(io.BytesIO(data))
@@ -331,8 +331,15 @@ def normalized_image(data: bytes) -> Image.Image:
         rgba = source.convert("RGBA")
         canvas = Image.new("RGBA", rgba.size, "white")
         canvas.alpha_composite(rgba)
-        return canvas.convert("RGB")
-    return source.convert("RGB")
+        rgb = canvas.convert("RGB")
+    else:
+        rgb = source.convert("RGB")
+
+    # Gentle autocontrast removes phone shadows and paper yellowing without noise
+    try:
+        return ImageOps.autocontrast(rgb, cutoff=0.5)
+    except Exception:
+        return rgb
 
 
 def pdf_pages(data: bytes, page_limit: int) -> tuple[list[tuple[int, Image.Image]], bool]:
