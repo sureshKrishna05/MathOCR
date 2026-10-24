@@ -22,7 +22,7 @@ if (-not $compiler) {
 
 Write-Host "Using Inno Setup compiler: $compiler"
 & $compiler "packaging\windows\MathOCR.iss"
-if (-not (Test-Path "dist\MathOCR-Setup.exe")) {
-    throw "Inno Setup did not create dist\MathOCR-Setup.exe"
+if (-not (Test-Path "dist\Qryptex-Setup.exe")) {
+    throw "Inno Setup did not create dist\Qryptex-Setup.exe"
 }
-Write-Host "Windows installer created successfully: dist\MathOCR-Setup.exe"
+Write-Host "Windows installer created successfully: dist\Qryptex-Setup.exe"

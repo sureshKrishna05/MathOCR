@@ -1,36 +1,38 @@
 <!doctype html>
 <!--
-  MathOCR interface by Bouronikos Christos <chrisbouronikos@gmail.com>.
-  Support continued development at https://paypal.me/christosbouronikos.
-
-  A single static page: drop an image or PDF, review the recognized LaTeX,
-  export editable Word equations. Everything is processed by the local
-  MathOCR engine; nothing leaves the computer. KaTeX is bundled locally so
-  previews also work completely offline inside the desktop application.
+  Qryptex — Academic Document & Math to Word OCR
+  https://qryptex.in
+  Everything is processed locally by the Qryptex engine; no files leave your computer.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Convert academic documents, images, and PDFs into editable Microsoft Word documents with native equations." />
-    <meta name="theme-color" content="#f5f1e8" />
-    <title>MyKind — Academic Document & Math to Word</title>
+    <meta name="description" content="Qryptex — Convert academic documents, math formulas, textbook photos, and PDFs into editable Microsoft Word documents with native equations." />
+    <meta name="theme-color" content="#f8fafc" />
+    <title>Qryptex — Bharathidasan University | Academic Document &amp; Math to Word</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
-    <link rel="stylesheet" href="./styles.css?v=1.0.8" />
+    <link rel="stylesheet" href="./styles.css?v=2.0.0" />
     <script defer src="./vendor/katex/katex.min.js"></script>
-    <script defer src="./app.js?v=1.0.8"></script>
+    <script defer src="./app.js?v=2.0.0"></script>
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="#top" aria-label="MyKind">
+      <a class="brand" href="#top" aria-label="Qryptex">
         <span class="brand-mark" aria-hidden="true">∫</span>
         <span class="brand-text">
-          <span class="brand-title">MyKind</span>
-          <span class="brand-by" data-i18n="brandBy">Document & Math to Word</span>
+          <span class="brand-title-wrap">
+            <span class="brand-title">Qryptex</span>
+            <span class="univ-badge">Bharathidasan University</span>
+          </span>
+          <span class="brand-by" data-i18n="brandBy">Academic Document &amp; Math to Word</span>
         </span>
       </a>
       <div class="header-controls">
-        <button class="refresh-button" id="refreshPageButton" type="button">
+        <button class="refresh-button" id="refreshPageButton" type="button" title="Refresh local engine connection">
           <span aria-hidden="true">⟳</span>
           <span data-i18n="refreshPage">Refresh</span>
         </button>
@@ -47,19 +49,28 @@
 
     <main id="top">
       <section class="intro">
-        <p class="eyebrow" data-i18n="eyebrow">ACADEMIC DOCUMENT & MATH OCR</p>
+        <div class="intro-badge-row">
+          <div class="univ-pill">
+            <span class="univ-icon" aria-hidden="true">🏛️</span>
+            <span>Bharathidasan University Edition</span>
+          </div>
+          <div class="eyebrow-pill">
+            <span class="eyebrow-sparkle">✦</span>
+            <span class="eyebrow" data-i18n="eyebrow">ACADEMIC DOCUMENT &amp; MATH OCR</span>
+          </div>
+        </div>
         <h1 data-i18n="introTitle">Images and PDFs into editable Word documents.</h1>
         <p class="intro-copy" data-i18n="introCopy">Drop a file, review the reconstructed document, and export editable Word equations. Everything runs locally on your computer.</p>
       </section>
 
       <section class="engine-banner" id="engineBanner" hidden>
-        <div>
+        <div class="banner-content">
           <strong data-i18n="engineBannerTitle">The local engine is not running.</strong>
-          <span data-i18n="engineBannerCopy">Recognition happens on your computer, so MathOCR needs its engine.</span>
+          <span data-i18n="engineBannerCopy">Recognition happens on your computer, so Qryptex needs its engine.</span>
         </div>
         <a
           id="engineBannerLink"
-          href="https://github.com/ChristosBouronikos/MathOCR/releases/latest"
+          href="https://qryptex.in"
           target="_blank"
           rel="noopener noreferrer"
         ><span data-i18n="engineBannerAction">Get the desktop app</span> ↗</a>
@@ -84,7 +95,9 @@
             accept="image/png,image/jpeg,image/webp,image/tiff,application/pdf,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff"
             multiple
           />
-          <span class="drop-icon" aria-hidden="true">↥</span>
+          <div class="drop-icon-wrapper">
+            <span class="drop-icon" aria-hidden="true">↥</span>
+          </div>
           <strong data-i18n="dropFiles">Drop images or PDFs here</strong>
           <span class="drop-hint" data-i18n="browseFiles">click to browse, or paste a screenshot (Ctrl+V) · PNG, JPG, WEBP, TIFF, PDF</span>
         </label>
@@ -171,6 +184,21 @@
         <div class="document-list" id="documentList"></div>
       </section>
 
+      <section class="results-section" id="resultsSection" hidden aria-labelledby="resultsTitle">
+        <div class="results-heading">
+          <div>
+            <h2 id="resultsTitle" data-i18n="recognizedEquations">Recognized equations</h2>
+            <p id="resultsSummary"></p>
+          </div>
+          <div class="export-actions">
+            <button class="secondary-button" id="copyAllButton" type="button" data-i18n="copyAll">Copy all LaTeX</button>
+            <button class="secondary-button" id="downloadTexButton" type="button" data-i18n="downloadTex">Download .tex</button>
+            <button class="primary-button word-button" id="downloadWordButton" type="button" data-i18n="downloadWord">Download Word</button>
+          </div>
+        </div>
+        <div class="result-list" id="resultList"></div>
+      </section>
+
       <section class="storage-section" id="storageSection" aria-labelledby="storageTitle">
         <div class="storage-heading">
           <div>
@@ -191,8 +219,11 @@
       </section>
 
       <section class="privacy-strip">
-        <strong data-i18n="privateTitle">Private by design.</strong>
-        <span data-i18n="privateCopy">Files are processed only by the local recognition engine running on this computer and never leave it.</span>
+        <span class="privacy-icon">🔒</span>
+        <div>
+          <strong data-i18n="privateTitle">Private by design.</strong>
+          <span data-i18n="privateCopy">Files are processed only by the local recognition engine running on this computer and never leave it.</span>
+        </div>
       </section>
     </main>
 
@@ -201,15 +232,21 @@
         <div class="footer-brand">
           <span class="footer-mark" aria-hidden="true">∫</span>
           <div>
-            <strong>MyKind</strong>
-            <p data-i18n="footerTagline">Local academic document & math recognition with editable Word output.</p>
+            <div class="footer-title-row">
+              <strong>Qryptex</strong>
+              <span class="footer-univ">Bharathidasan University</span>
+            </div>
+            <p data-i18n="footerTagline">Local academic document &amp; math recognition with editable Word output.</p>
           </div>
+        </div>
+        <div class="footer-links">
+          <a href="https://qryptex.in" target="_blank" rel="noopener" class="footer-link-badge">Official Site: qryptex.in ↗</a>
         </div>
       </div>
       <div class="footer-legal">
-        <span>© 2026 MyKind · <span data-i18n="footerLicense">MIT License</span></span>
+        <span>© 2026 Qryptex · Developed for Bharathidasan University · <a href="https://qryptex.in" target="_blank" rel="noopener">License &amp; More Info (qryptex.in)</a></span>
         <span>
-          MyKind <span id="footerVersion">1.0.8</span> ·
+          Qryptex <span id="footerVersion">2.0.0</span> ·
           <button class="link-button" id="checkUpdatesButton" type="button" data-i18n="checkUpdates">Check for updates</button>
         </span>
       </div>

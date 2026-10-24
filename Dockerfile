@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MATHOCR_DEVICE=cpu
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y pandoc libgl1 libglib2.0-0 \
+    && apt-get install --no-install-recommends -y pandoc libgl1 libglib2.0-0 tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY backend backend
 COPY frontend frontend
+COPY scripts scripts
 
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]

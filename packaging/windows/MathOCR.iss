@@ -1,10 +1,10 @@
 ; MathOCR Windows installer by Bouronikos Christos <chrisbouronikos@gmail.com>.
 ; Support development: https://paypal.me/christosbouronikos
 
-#define MyAppName "MathOCR"
-#define MyAppVersion "1.0.6"
-#define MyAppPublisher "Bouronikos Christos"
-#define MyAppURL "https://paypal.me/christosbouronikos"
+#define MyAppName "Qryptex"
+#define MyAppVersion "2.0.0"
+#define MyAppPublisher "Qryptex (Bharathidasan University)"
+#define MyAppURL "https://qryptex.in"
 #define MyAppExeName "MathOCR.exe"
 
 [Setup]
@@ -26,7 +26,7 @@ DisableProgramGroupPage=yes
 SourceDir={#SourcePath}..\..
 LicenseFile=LICENSE
 OutputDir=dist
-OutputBaseFilename=MathOCR-Setup
+OutputBaseFilename=Qryptex-Setup
 SetupIconFile=packaging\MathOCR.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64

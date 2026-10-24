@@ -22,16 +22,16 @@ const ENGINE_SHORT_NAMES = {
 
 const translations = {
   en: {
-    pageTitle: "MyKind — Academic Document & Math to Word",
-    brandBy: "Document & Math to Word",
+    pageTitle: "Qryptex — Bharathidasan University | Academic Document & Math to Word",
+    brandBy: "Bharathidasan University Edition · Math to Word",
     refreshPage: "Refresh",
     updateTitle: "A new version is available",
-    updateDetail: "MyKind {{latest}} is available — you have {{current}}.",
+    updateDetail: "Qryptex {{latest}} is available — you have {{current}}.",
     updateNotes: "Release notes ↗",
     updateNow: "Update now",
     updateDownload: "Download ↗",
-    updateStartedWin: "Installer launched. MyKind will now close to finish updating.",
-    updateStartedMac: "Update downloaded to your Downloads folder. Drag MyKind into Applications to replace the old version, then reopen it.",
+    updateStartedWin: "Installer launched. Qryptex will now close to finish updating.",
+    updateStartedMac: "Update downloaded to your Downloads folder. Drag Qryptex into Applications to replace the old version, then reopen it.",
     updateFailed: "The update could not be downloaded — try again or download it from GitHub.",
     checkUpdates: "Check for updates",
     checkingUpdates: "Checking for updates…",
@@ -82,7 +82,7 @@ const translations = {
     downloadDocWord: "Download document (Word)",
     editableDocument: "Editable document text and LaTeX",
     documentCopied: "Document text copied",
-    documentTitle: "MyKind Document",
+    documentTitle: "Qryptex Document",
     recognizedEquations: "Recognized equations",
     resultsOne: "1 equation found. Edit the LaTeX and the preview updates live.",
     resultsMany: "{{count}} equations found. Edit the LaTeX and the preview updates live.",
@@ -165,16 +165,16 @@ const translations = {
     footerMadeWith: "made for students, teachers, and researchers",
   },
   el: {
-    pageTitle: "MyKind — Έγγραφα & Μαθηματικά σε Word",
-    brandBy: "Έγγραφα & Μαθηματικά σε Word",
+    pageTitle: "Qryptex — Πανεπιστήμιο Bharathidasan | Έγγραφα & Μαθηματικά σε Word",
+    brandBy: "Έκδοση Πανεπιστημίου Bharathidasan",
     refreshPage: "Ανανέωση",
     updateTitle: "Διαθέσιμη νέα έκδοση",
-    updateDetail: "Η έκδοση MyKind {{latest}} είναι διαθέσιμη — έχετε την {{current}}.",
+    updateDetail: "Η έκδοση Qryptex {{latest}} είναι διαθέσιμη — έχετε την {{current}}.",
     updateNotes: "Σημειώσεις έκδοσης ↗",
     updateNow: "Ενημέρωση τώρα",
     updateDownload: "Λήψη ↗",
-    updateStartedWin: "Ο εγκαταστάτης ξεκίνησε. Το MyKind θα κλείσει τώρα για να ολοκληρωθεί η ενημέρωση.",
-    updateStartedMac: "Η ενημέρωση κατέβηκε στον φάκελο Λήψεις. Σύρετε το MyKind στις Εφαρμογές για να αντικαταστήσετε την παλιά έκδοση και ανοίξτε το ξανά.",
+    updateStartedWin: "Ο εγκαταστάτης ξεκίνησε. Το Qryptex θα κλείσει τώρα για να ολοκληρωθεί η ενημέρωση.",
+    updateStartedMac: "Η ενημέρωση κατέβηκε στον φάκελο Λήψεις. Σύρετε το Qryptex στις Εφαρμογές για να αντικαταστήσετε την παλιά έκδοση και ανοίξτε το ξανά.",
     updateFailed: "Η ενημέρωση δεν κατέβηκε — δοκιμάστε ξανά ή κατεβάστε την από το GitHub.",
     checkUpdates: "Έλεγχος για ενημερώσεις",
     checkingUpdates: "Έλεγχος για ενημερώσεις…",
@@ -225,7 +225,7 @@ const translations = {
     downloadDocWord: "Λήψη εγγράφου (Word)",
     editableDocument: "Επεξεργάσιμο κείμενο εγγράφου και LaTeX",
     documentCopied: "Το κείμενο του εγγράφου αντιγράφηκε",
-    documentTitle: "Έγγραφο MyKind",
+    documentTitle: "Έγγραφο Qryptex",
     recognizedEquations: "Αναγνωρισμένες εξισώσεις",
     resultsOne: "Βρέθηκε 1 εξίσωση. Επεξεργαστείτε το LaTeX και η προεπισκόπηση ενημερώνεται άμεσα.",
     resultsMany: "Βρέθηκαν {{count}} εξισώσεις. Επεξεργαστείτε το LaTeX και η προεπισκόπηση ενημερώνεται άμεσα.",
@@ -961,7 +961,7 @@ async function triggerDocxDownload(body, defaultFilename) {
 
   // Browser download: binary DOCX stream
   const blob = await response.blob();
-  let filename = defaultFilename || "MyKind Document.docx";
+  let filename = defaultFilename || "Qryptex Document.docx";
   const disposition = response.headers.get("content-disposition");
   if (disposition) {
     const matchUtf8 = disposition.match(/filename\*=utf-8''([^;\r\n]+)/i);
@@ -1014,7 +1014,7 @@ async function downloadDocumentWord() {
     const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
     await triggerDocxDownload(
       { title: t("documentTitle"), markdown, template },
-      `MyKind Document.docx`
+      `Qryptex Document.docx`
     );
   } catch (error) {
     showToast(error.message || t("wordFailed"));

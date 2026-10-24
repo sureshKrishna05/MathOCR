@@ -58,7 +58,7 @@ def ensure_environment() -> None:
         venv.EnvBuilder(with_pip=True).create(VENV_DIR)
 
     if not STAMP.exists():
-        print("Installing MathOCR dependencies (first run only, a few minutes) …")
+        print("Installing Qryptex dependencies (first run only, a few minutes) …")
         python = str(venv_python())
         subprocess.check_call([python, "-m", "pip", "install", "--upgrade", "pip"])
         subprocess.check_call(
@@ -81,7 +81,7 @@ def serve() -> None:
     import uvicorn
 
     url = f"http://{HOST}:{PORT}"
-    print(f"\nMathOCR is starting at {url}")
+    print(f"\nQryptex (Bharathidasan University Edition) is starting at {url}")
     print("Close this window (or press Ctrl+C) to stop the local engine.\n")
     threading.Timer(2.0, lambda: webbrowser.open(url)).start()
     uvicorn.run("backend.app:app", host=HOST, port=PORT, log_level="warning")

@@ -195,12 +195,12 @@ def run_desktop() -> None:
             import webview
 
             webview.create_window(
-                "MathOCR - MyKind",
+                "Qryptex — Bharathidasan University Math OCR",
                 desktop_url(port),
                 width=1180,
                 height=860,
                 min_size=(760, 620),
-                background_color="#f5f1e8",  # matches interface paper theme
+                background_color="#f8fafc",  # matches interface slate theme
                 text_select=True,
             )
             window_created = True
