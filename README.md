@@ -70,10 +70,15 @@ Models are stored in:
 
 Download the installer for your system from the [latest release](https://github.com/ChristosBouronikos/MathOCR/releases/latest):
 
-- **macOS:** open `MathOCR-macOS-*.dmg` and drag **MathOCR** to Applications.
-- **Windows:** run `MathOCR-Setup.exe`.
-
-Open MathOCR like any app and drag in a file. The first recognition downloads the models (a few minutes); everything after that works offline. You never install Python or anything else.
+- **Windows 10 / 11 (64-bit):**
+  1. Download and run `MathOCR-Setup.exe`.
+  2. The installer installs per-user into `%LOCALAPPDATA%\Programs\MathOCR` by default — **no administrator/UAC privileges required**.
+  3. Check the box if you want a **Desktop Shortcut** (Start Menu shortcut is created automatically).
+  4. Launch MathOCR from the Start Menu or Desktop.
+  5. On first launch, click **"Download all models now"** (or simply drag in a file). The application downloads and verifies the model weights using SHA-256 integrity checksums. Once downloaded (~480 MB), MathOCR works **100% offline**.
+- **macOS (12+):**
+  1. Open `MathOCR-macOS-*.dmg` and drag **MathOCR** to Applications.
+  2. Launch MathOCR from Applications.
 
 #### Option 2 — Run from source (auto-installs Python)
 
@@ -82,7 +87,7 @@ Clone the repository and start it with the launcher for your system. If Python i
 - **macOS:** double-click **`run.command`** (or `./run.command` in Terminal).
 - **Windows:** double-click **`run.bat`**.
 
-The launcher creates a local environment, installs the dependencies on first run, then opens MathOCR at <http://127.0.0.1:8000>. Greek page-text recognition needs **Tesseract** with the `ell` language — the macOS launcher installs it with Homebrew; on Windows install it from the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki). Math recognition works without Tesseract.
+The launcher creates a local environment, installs the dependencies on first run, then opens MathOCR at <http://127.0.0.1:8000>. Greek page-text recognition needs **Tesseract** with the `ell` language — the macOS launcher installs it with Homebrew; on Windows install it from the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki). MathOCR automatically checks `C:\Program Files\Tesseract-OCR\tesseract.exe` and PATH. Math recognition works without Tesseract.
 
 #### Option 3 — Manual (for developers)
 
@@ -94,6 +99,38 @@ python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
 ```
 
 Then open <http://127.0.0.1:8000>. Install [Pandoc](https://pandoc.org/installing.html) for Word export and [Tesseract](https://tesseract-ocr.github.io/) (+ Greek data) for document-mode text.
+
+### User Guide: How to Use MathOCR
+
+1. **Converting Documents & Images**:
+   - Drag and drop an image (PNG, JPEG, WebP) or PDF file directly onto the interface, or press <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste from the clipboard.
+   - Choose your document style (e.g. *Academic Textbook*, *Formal Report*, or *Standard Editable*).
+   - Click **Recognize Document**.
+2. **Reviewing and Editing**:
+   - MathOCR provides a live preview of reconstructed text, tables, and equations.
+   - Click any equation or text block to make manual corrections before exporting.
+3. **Downloading Editable Word Documents**:
+   - Click **Download document (Word)**.
+   - In the desktop application, the file is automatically saved into your Windows **Downloads** folder (`%USERPROFILE%\Downloads`), named as `MathOCR document by Bouronikos Christos.docx` (with automatic number incrementing if a file with the same name exists).
+   - In browser mode, your browser prompts you to save the file.
+   - Open the `.docx` file in Microsoft Word or LibreOffice. Equations are native OMML objects selectable and editable directly in Word's equation editor!
+
+### Troubleshooting & FAQ
+
+- **MathOCR is already running**:
+  MathOCR prevents duplicate background servers using a single-instance lock (`%LOCALAPPDATA%\MathOCR\mathocr.lock`). Launching the shortcut while MathOCR is already running automatically focuses or opens your browser to the active session.
+- **WebView2 is missing on Windows 10**:
+  If the Microsoft WebView2 runtime is not installed, MathOCR gracefully falls back to your default web browser (Edge, Chrome, Firefox) on a private loopback address (`127.0.0.1`).
+- **Insufficient Disk Space Error**:
+  Before downloading models, MathOCR checks that at least 500 MB of free space is available in `%LOCALAPPDATA%\MathOCR\models`. Free up space on your `C:` drive and retry.
+- **Corrupted or Interrupted Downloads**:
+  Model files are downloaded atomically with `.part` staging files and verified against upstream SHA-256 cryptographic checksums. If a network interruption occurs, MathOCR retries up to 3 times with exponential backoff. Incomplete downloads never corrupt existing models.
+- **Page text recognition is missing (Tesseract)**:
+  Math recognition works out-of-the-box. For full document page-text OCR, install Tesseract OCR from [UB-Mannheim](https://github.com/UB-Mannheim/tesseract/wiki). MathOCR automatically detects installations in `C:\Program Files\Tesseract-OCR\tesseract.exe` without needing manual PATH configuration.
+- **How to Update**:
+  Download and run the new `MathOCR-Setup.exe`. Your downloaded models in `%LOCALAPPDATA%\MathOCR\models` and user settings are preserved across upgrades.
+- **How to Uninstall**:
+  Go to Windows **Settings > Apps > Installed apps**, find **MathOCR**, and click **Uninstall**. The uninstaller cleanly removes application binaries from `%LOCALAPPDATA%\Programs\MathOCR` while keeping your exported documents and models safe.
 
 ### Native Word (OMML) & Structured Document Export
 

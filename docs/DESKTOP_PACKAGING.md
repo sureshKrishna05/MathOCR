@@ -6,29 +6,31 @@ The desktop edition packages the existing frontend and Python service into an ap
 
 ## Runtime design
 
-`desktop/main.py` starts FastAPI on a random `127.0.0.1` port, waits for its health endpoint, and opens that origin in a pywebview native window. Closing the window stops the server. The service is never bound to a public network interface.
+`desktop/main.py` starts FastAPI on a random `127.0.0.1` port, waits for its health endpoint, and opens that origin in a native pywebview window (or falls back seamlessly to the user's default browser if WebView2 or GUI drivers are unavailable). Closing the window or terminating the process gracefully stops the Uvicorn server and removes the instance lock. The service is never bound to a public network interface.
 
-PyInstaller produces a one-folder application because large machine-learning runtimes start more reliably from installed files than from a self-extracting `--onefile` executable. The folder is hidden inside `MathOCR.app` on macOS and installed under Program Files by Inno Setup on Windows.
+MathOCR enforces a single active instance using a lock file (`%LOCALAPPDATA%\MathOCR\mathocr.lock`). If the user clicks the shortcut while MathOCR is already running, the launcher detects the healthy server, opens the browser to that session, and exits immediately.
 
-The `pypandoc_binary` build dependency supplies Pandoc inside the application. `backend.app.find_pandoc()` checks the frozen package before looking at the user's `PATH`.
-
-## Bundling Tesseract (optional but recommended)
-
-Greek/English page-text recognition in **document** mode uses the Tesseract program. `pytesseract` (the Python binding) is bundled automatically, but the Tesseract executable is a native binary that must be supplied per platform. Two supported options:
-
-1. **Bundle it.** Place a platform build of Tesseract (the executable plus its shared libraries — leptonica, image codecs) under `packaging/vendor/tesseract/`. The PyInstaller spec copies that folder into the app, and `backend.engines.find_tesseract_binary()` finds it via `MEIPASS/vendor/tesseract/`. The Greek/English `traineddata` is downloaded on demand into the model store, so it need not be bundled.
-2. **Skip it.** If `packaging/vendor/tesseract/` is absent, the app still ships. Math recognition works fully; document mode returns the equations and reports that page-text recognition needs Tesseract installed. This is acceptable for a first release.
-
-Nougat is **never** bundled — its weights are non-commercial. It stays an opt-in `pip install nougat-ocr` for the source workflow.
+PyInstaller produces a one-folder application (`dist/MathOCR/`) because large machine-learning runtimes start more reliably from installed files than from a self-extracting `--onefile` executable.
+- On Windows, Inno Setup 6 packages this into `dist/MathOCR-Setup.exe`.
+- The installer installs per-user into `%LOCALAPPDATA%\Programs\MathOCR` by default, requiring **no administrator privileges**.
+- Python-docx templates, Pandoc (`pypandoc_binary`), frontend assets, and OCR modules are all bundled.
+- If Tesseract is installed separately via UB-Mannheim, MathOCR automatically discovers it at `C:\Program Files\Tesseract-OCR\tesseract.exe` or on `PATH`.
 
 ## First-launch model behavior
 
-The installer contains the OCR libraries but not their downloadable weights. On the first recognition (or when the user presses **Download all models now**), MathOCR fetches the weights into a single per-user folder:
+The installer contains the OCR libraries and bundled tools, but model weights are downloaded once on demand into a per-user directory:
 
-- macOS: `~/Library/Application Support/MathOCR/models`
 - Windows: `%LOCALAPPDATA%\MathOCR\models`
+- macOS: `~/Library/Application Support/MathOCR/models`
+- Linux: `~/.cache/mathocr/models`
 
-Everything (Pix2Text, pix2tex, RapidLaTeXOCR checkpoints, Tesseract language data) lives under that one root — see `backend/model_store.py`. That single location is what lets the in-app storage panel report true sizes and delete a model to reclaim disk space; it re-downloads automatically when next needed. Subsequent runs reuse the cache and work offline. Total download is about **480 MB** (plus ~1.4 GB only if the user opts into Nougat).
+All model downloads are governed by a versioned manifest (`backend/model_store.py`) with upstream pinned URLs and cryptographic **SHA-256 checksums**:
+- Atomic downloads stream to `.part` files, verify byte count and SHA-256 hash, and only then atomically replace the target file.
+- Corrupted or partial downloads are immediately rejected and retried with exponential backoff (up to 3 attempts).
+- Before downloading, a pre-flight disk space check ensures at least ~500 MB of free storage is available.
+- Once downloaded, MathOCR operates **100% offline** without making external network calls.
+- Total download is approximately **480 MB** (plus ~1.4 GB only if the user opts into Nougat).
+- Upgrades and uninstalls are non-destructive: downloaded models in `%LOCALAPPDATA%\MathOCR\models` and user settings remain untouched.
 
 ## Local developer build
 

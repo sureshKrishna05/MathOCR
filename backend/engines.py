@@ -230,7 +230,7 @@ class TextLine:
 
 
 def find_tesseract_binary() -> str | None:
-    """Locate the Tesseract program: override, desktop bundle, then PATH."""
+    """Locate the Tesseract program: override, desktop bundle, standard paths, then PATH."""
 
     override = os.getenv("MATHOCR_TESSERACT_PATH")
     if override and os.path.isfile(override):
@@ -241,7 +241,22 @@ def find_tesseract_binary() -> str | None:
     bundled = APP_ROOT / "vendor" / "tesseract" / executable
     if bundled.is_file():
         return str(bundled)
-    return shutil.which("tesseract")
+
+    on_path = shutil.which("tesseract")
+    if on_path:
+        return on_path
+
+    if sys.platform == "win32":
+        standard_windows_paths = [
+            Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
+        ]
+        for candidate in standard_windows_paths:
+            if candidate.is_file():
+                return str(candidate)
+
+    return None
 
 
 class TesseractTextEngine:

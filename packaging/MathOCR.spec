@@ -19,7 +19,19 @@ PROJECT_ROOT = Path(SPECPATH).parent.resolve()
 # missing it here caused a FileNotFoundError on first recognition in early builds.
 datas = [(str(PROJECT_ROOT / "frontend"), "frontend")]
 binaries = []
-hiddenimports = ["pytesseract"]
+hiddenimports = [
+    "pytesseract",
+    "uvicorn.logging",
+    "uvicorn.loops",
+    "uvicorn.loops.auto",
+    "uvicorn.protocols",
+    "uvicorn.protocols.http",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.websockets",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan",
+    "uvicorn.lifespan.on",
+]
 # transformers and optimum expose their submodules through lazy loading
 # (importlib at runtime, invisible to static analysis), so every submodule
 # must be collected explicitly or the frozen app dies with
@@ -34,12 +46,17 @@ for package_name in (
     "transformers",
     "optimum",
     "pypandoc",
+    "pypandoc_binary",
     "pypdfium2",
+    "docx",
 ):
-    package_datas, package_binaries, package_hiddenimports = collect_all(package_name)
-    datas += package_datas
-    binaries += package_binaries
-    hiddenimports += package_hiddenimports
+    try:
+        package_datas, package_binaries, package_hiddenimports = collect_all(package_name)
+        datas += package_datas
+        binaries += package_binaries
+        hiddenimports += package_hiddenimports
+    except Exception:
+        pass
 
 # The Tesseract program supplies Greek/English text recognition for "document"
 # mode. Drop a platform build of it (plus leptonica) into packaging/vendor/
