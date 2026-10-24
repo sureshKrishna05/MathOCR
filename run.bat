@@ -35,8 +35,19 @@ if not defined PY_CMD (
     )
 )
 
+rem Fallback: Check standard Python 3.11 installation locations
 if not defined PY_CMD (
-    echo [!] Python was not found on your system.
+    if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+        set "PY_CMD=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+        echo [OK] Detected Python 3.11 in LocalAppData.
+    ) else if exist "%ProgramFiles%\Python311\python.exe" (
+        set "PY_CMD=%ProgramFiles%\Python311\python.exe"
+        echo [OK] Detected Python 3.11 in Program Files.
+    )
+)
+
+if not defined PY_CMD (
+    echo [!] Python was not detected on your system.
     echo     Attempting to install Python 3.11 automatically via winget...
     echo.
     where winget >nul 2>&1
@@ -49,10 +60,10 @@ if not defined PY_CMD (
         )
     )
     if not defined PY_CMD (
-        echo [X] Automatic installation failed.
-        echo     Please download and install Python 3.11 (64-bit) manually:
+        echo [X] Python is not installed.
+        echo     Please install Python 3.11 (64-bit) from:
         echo     https://www.python.org/downloads/release/python-3119/
-        echo     IMPORTANT: Check the box "Add python.exe to PATH" during setup.
+        echo     NOTE: Ensure "Add python.exe to PATH" is checked during setup.
         echo.
         pause
         exit /b 1
@@ -62,10 +73,12 @@ if not defined PY_CMD (
 rem 2. Check for Tesseract OCR
 if exist "C:\Program Files\Tesseract-OCR\tesseract.exe" (
     echo [OK] Tesseract OCR detected at C:\Program Files\Tesseract-OCR.
+) else if exist "%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe" (
+    echo [OK] Tesseract OCR detected in LocalAppData.
 ) else (
     echo [i] Tesseract OCR not detected.
     echo     Math equation recognition works 100%% out of the box.
-    echo     For full page document text, install Tesseract from:
+    echo     For full document text, install Tesseract from:
     echo     https://github.com/UB-Mannheim/tesseract/wiki
 )
 echo.

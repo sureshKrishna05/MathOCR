@@ -360,8 +360,14 @@ class RapidOcrTextEngine:
         rgb = image.convert("RGB")
         res = self._engine(self._np.array(rgb))
         lines: list[TextLine] = []
-        if res.txts:
-            for box, text, score in zip(res.boxes, res.txts, res.scores):
+        if res is None:
+            return lines
+
+        # Object return style (res.boxes, res.txts, res.scores)
+        if hasattr(res, "txts") and res.txts:
+            boxes = getattr(res, "boxes", [])
+            scores = getattr(res, "scores", [1.0] * len(res.txts))
+            for box, text, score in zip(boxes, res.txts, scores):
                 stripped = text.strip()
                 if not stripped:
                     continue
@@ -371,9 +377,26 @@ class RapidOcrTextEngine:
                     TextLine(
                         box=Box(min(xs), min(ys), max(xs), max(ys)),
                         text=stripped,
-                        confidence=float(score),
+                        confidence=float(score) if score is not None else 1.0,
                     )
                 )
+        # Tuple return style ((result_list, elapse_list))
+        elif isinstance(res, (tuple, list)) and len(res) > 0 and res[0]:
+            for item in res[0]:
+                if len(item) >= 3:
+                    box, text, score = item[0], item[1], item[2]
+                    stripped = str(text).strip()
+                    if not stripped:
+                        continue
+                    xs = [float(pt[0]) for pt in box]
+                    ys = [float(pt[1]) for pt in box]
+                    lines.append(
+                        TextLine(
+                            box=Box(min(xs), min(ys), max(xs), max(ys)),
+                            text=stripped,
+                            confidence=float(score) if score is not None else 1.0,
+                        )
+                    )
         return lines
 
 

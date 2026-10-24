@@ -12,6 +12,7 @@ documents through Pandoc, and manages the on-disk model storage.
 
 from __future__ import annotations
 
+import gc
 import io
 import json
 import logging
@@ -385,6 +386,15 @@ def recognize_file(
                 pages_processed += 1
             finally:
                 image.close()
+                del image
+                gc.collect()
+                if "torch" in sys.modules:
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
             page_ref = page_number if is_pdf else None
             for region in outcome.regions:
                 if not region.latex:
