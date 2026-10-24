@@ -243,7 +243,25 @@ h2 { font-size: clamp(1.5rem, 3vw, 2rem); }
   padding-bottom: 18px; border-bottom: 1px solid var(--line);
 }
 .results-heading p { margin: 8px 0 0; color: var(--muted); font-size: 0.76rem; max-width: 560px; }
-.export-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.export-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 7px; }
+.template-selector-label { display: inline-flex; align-items: center; }
+.template-select {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.template-select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(30, 58, 138, 0.15);
+}
 .ensemble-advice {
   display: grid; gap: 2px; margin-top: 16px; padding: 12px 14px;
   border: 1px solid #bad6ca; border-left: 4px solid var(--green); border-radius: 10px;

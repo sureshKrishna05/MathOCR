@@ -84,7 +84,7 @@ FILENAME_SUFFIX = f"by {AUTHOR}"  # every exported file carries the author's nam
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 12
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
-PDF_RENDER_SCALE = 2.8  # ≈200 dpi; complicated formulas need the extra pixels
+PDF_RENDER_SCALE = 2.0  # ≈150 dpi; optimal balance of crisp OCR fidelity and fast processing speed
 
 # In-app updates read the newest GitHub release and, in the packaged app, launch
 # its installer (which upgrades over the current install and relaunches).
@@ -146,10 +146,13 @@ app.add_middleware(
         "http://localhost:5500",
         "http://127.0.0.1:8080",
         "http://localhost:8080",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
     ],
     allow_origin_regex=r"https://[A-Za-z0-9-]+\.github\.io",
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
+    expose_headers=["Content-Disposition", "X-Export-Warnings"],
 )
 
 registry = EngineRegistry(device=os.getenv("MATHOCR_DEVICE", "cpu"))
@@ -205,6 +208,9 @@ class DocxRequest(BaseModel):
     equations: list[str] = Field(default_factory=list, max_length=500)
     markdown: str | None = Field(default=None, max_length=200_000)
     document: dict[str, Any] | None = Field(default=None)
+    template: Literal["academic_textbook", "research_paper", "standard", "preserve_layout"] = (
+        "academic_textbook"
+    )
     # When true the file is written straight into the user's Downloads folder
     # (desktop app) instead of streamed back for the browser to save.
     save_to_downloads: bool = False
@@ -932,17 +938,17 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
     temp_dir = tempfile.mkdtemp(prefix="mathocr-")
     output_path = Path(temp_dir, "equations.docx")
 
-    if request.document:
-        doc = Document.from_dict(request.document)
-    elif request.markdown and request.markdown.strip():
+    if request.markdown and request.markdown.strip():
         doc = Document.from_markdown(request.markdown, title=request.title)
+    elif request.document:
+        doc = Document.from_dict(request.document)
     else:
         elements = [DisplayEquation(latex=equation) for equation in request.equations]
         doc = Document(title=request.title, elements=elements)
 
     try:
         export_warnings = await run_in_threadpool(
-            build_docx_from_document, doc, output_path, pandoc
+            build_docx_from_document, doc, output_path, pandoc, request.template
         )
     except Exception as exc:
         remove_tree(temp_dir)
@@ -970,10 +976,15 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
             }
         )
 
+    response_headers = {}
+    if export_warnings:
+        response_headers["X-Export-Warnings"] = json.dumps(export_warnings)
+
     return FileResponse(
         output_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=filename,
+        headers=response_headers,
         background=BackgroundTask(remove_tree, temp_dir),
     )
 

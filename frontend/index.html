@@ -12,22 +12,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Convert mathematics in images and PDFs into editable LaTeX and Word equations — locally, on your computer." />
-    <meta name="author" content="Bouronikos Christos" />
+    <meta name="description" content="Convert academic documents, images, and PDFs into editable Microsoft Word documents with native equations." />
     <meta name="theme-color" content="#f5f1e8" />
-    <title>MathOCR by Bouronikos Christos</title>
+    <title>MyKind — Academic Document & Math to Word</title>
     <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
-    <link rel="stylesheet" href="./styles.css?v=1.0.6" />
+    <link rel="stylesheet" href="./styles.css?v=1.0.8" />
     <script defer src="./vendor/katex/katex.min.js"></script>
-    <script defer src="./app.js?v=1.0.6"></script>
+    <script defer src="./app.js?v=1.0.8"></script>
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="#top" aria-label="MathOCR">
+      <a class="brand" href="#top" aria-label="MyKind">
         <span class="brand-mark" aria-hidden="true">∫</span>
         <span class="brand-text">
-          <span class="brand-title">MathOCR</span>
-          <span class="brand-by" data-i18n="brandBy">by Bouronikos Christos</span>
+          <span class="brand-title">MyKind</span>
+          <span class="brand-by" data-i18n="brandBy">Document & Math to Word</span>
         </span>
       </a>
       <div class="header-controls">
@@ -48,9 +47,9 @@
 
     <main id="top">
       <section class="intro">
-        <p class="eyebrow" data-i18n="eyebrow">LOCAL MATHEMATICS OCR</p>
-        <h1 data-i18n="introTitle">Images and PDFs into editable equations.</h1>
-        <p class="intro-copy" data-i18n="introCopy">Drop a file, review the LaTeX, export editable Word equations. Everything runs on your computer.</p>
+        <p class="eyebrow" data-i18n="eyebrow">ACADEMIC DOCUMENT & MATH OCR</p>
+        <h1 data-i18n="introTitle">Images and PDFs into editable Word documents.</h1>
+        <p class="intro-copy" data-i18n="introCopy">Drop a file, review the reconstructed document, and export editable Word equations. Everything runs locally on your computer.</p>
       </section>
 
       <section class="engine-banner" id="engineBanner" hidden>
@@ -96,8 +95,8 @@
           <label class="field">
             <span data-i18n="inputType">What do you want to recognize?</span>
             <select id="recognitionMode">
-              <option value="document" data-i18n="modeDocument">All text + math (whole document)</option>
-              <option value="mixed" selected data-i18n="modeMixed">Only the math inside a page of text</option>
+              <option value="document" selected data-i18n="modeDocument">All text + math (whole document)</option>
+              <option value="mixed" data-i18n="modeMixed">Only the math inside a page of text</option>
               <option value="formula" data-i18n="modeFormula">Only one equation (cropped image)</option>
             </select>
           </label>
@@ -153,30 +152,23 @@
             <p data-i18n="documentHint">Edit the text and math below, then export the whole document to Word.</p>
           </div>
           <div class="export-actions">
+            <label class="template-selector-label">
+              <select id="docTemplate" class="template-select" aria-label="Document style">
+                <option value="academic_textbook" selected data-i18n="styleAcademic">Academic Textbook</option>
+                <option value="research_paper" data-i18n="styleResearch">Research Paper</option>
+                <option value="standard" data-i18n="styleStandard">Standard Editable Document</option>
+                <option value="preserve_layout" data-i18n="stylePreserve">Preserve Original Layout</option>
+              </select>
+            </label>
             <button class="secondary-button" id="copyDocButton" type="button" data-i18n="copyDocument">Copy text</button>
             <button class="primary-button word-button" id="downloadDocWordButton" type="button" data-i18n="downloadDocWord">Download document (Word)</button>
-          </div>
-        </div>
-        <div class="document-list" id="documentList"></div>
-      </section>
-
-      <section class="results-section" id="resultsSection" hidden aria-labelledby="resultsTitle">
-        <div class="results-heading">
-          <div>
-            <h2 id="resultsTitle" data-i18n="recognizedEquations">Recognized equations</h2>
-            <p id="resultsSummary"></p>
-          </div>
-          <div class="export-actions">
-            <button class="secondary-button" id="copyAllButton" type="button" data-i18n="copyAll">Copy all LaTeX</button>
-            <button class="secondary-button" id="downloadTexButton" type="button" data-i18n="downloadTex">Download .tex</button>
-            <button class="primary-button word-button" id="downloadWordButton" type="button" data-i18n="downloadWord">Download Word</button>
           </div>
         </div>
         <aside class="ensemble-advice" id="ensembleAdvice" hidden role="note">
           <strong data-i18n="ensembleAdviceTitle">Want a second opinion?</strong>
           <span data-i18n="ensembleAdvice">If the result is not satisfactory, select “Cross-check all engines” and recognize the file again.</span>
         </aside>
-        <div class="result-list" id="resultList"></div>
+        <div class="document-list" id="documentList"></div>
       </section>
 
       <section class="storage-section" id="storageSection" aria-labelledby="storageTitle">
@@ -200,7 +192,7 @@
 
       <section class="privacy-strip">
         <strong data-i18n="privateTitle">Private by design.</strong>
-        <span data-i18n="privateCopy">Files are processed only by the MathOCR engine running on this computer and never leave it.</span>
+        <span data-i18n="privateCopy">Files are processed only by the local recognition engine running on this computer and never leave it.</span>
       </section>
     </main>
 
@@ -209,27 +201,15 @@
         <div class="footer-brand">
           <span class="footer-mark" aria-hidden="true">∫</span>
           <div>
-            <strong>MathOCR</strong>
-            <p data-i18n="footerTagline">Local mathematics recognition with editable output.</p>
+            <strong>MyKind</strong>
+            <p data-i18n="footerTagline">Local academic document & math recognition with editable Word output.</p>
           </div>
         </div>
-        <nav class="footer-column" aria-label="Project">
-          <h3 data-i18n="footerProject">Project</h3>
-          <a href="https://github.com/ChristosBouronikos/MathOCR" target="_blank" rel="noopener noreferrer" data-i18n="footerSource">Source code</a>
-          <a href="https://github.com/ChristosBouronikos/MathOCR/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="footerDownloads">Downloads</a>
-          <a href="https://github.com/ChristosBouronikos/MathOCR/issues/new?template=bug_report.yml" target="_blank" rel="noopener noreferrer" data-i18n="footerReportBug">Report a bug</a>
-        </nav>
-        <nav class="footer-column" aria-label="Author">
-          <h3 data-i18n="footerAuthor">Author</h3>
-          <a href="https://github.com/ChristosBouronikos" target="_blank" rel="noopener noreferrer" data-i18n="footerGithub">GitHub profile</a>
-          <a href="mailto:chrisbouronikos@gmail.com">chrisbouronikos@gmail.com</a>
-          <a href="https://paypal.me/christosbouronikos" target="_blank" rel="noopener noreferrer" data-i18n="footerDonate">Support on PayPal ♥</a>
-        </nav>
       </div>
       <div class="footer-legal">
-        <span>© 2026 Bouronikos Christos · <span data-i18n="footerLicense">MIT License</span></span>
+        <span>© 2026 MyKind · <span data-i18n="footerLicense">MIT License</span></span>
         <span>
-          MathOCR <span id="footerVersion">1.0.6</span> ·
+          MyKind <span id="footerVersion">1.0.8</span> ·
           <button class="link-button" id="checkUpdatesButton" type="button" data-i18n="checkUpdates">Check for updates</button>
         </span>
       </div>

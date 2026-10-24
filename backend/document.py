@@ -181,6 +181,7 @@ class Heading:
     level: int = 1
     text: str = ""
     runs: list[RunType] = field(default_factory=list)
+    alignment: str = "left"  # left | center | right
     box: tuple[int, int, int, int] | None = None
     type: Literal["heading"] = "heading"
 
@@ -196,6 +197,7 @@ class Heading:
             "level": self.level,
             "text": self.text,
             "runs": [run.to_dict() for run in self.runs],
+            "alignment": self.alignment,
             "box": self.box,
         }
 
@@ -211,6 +213,7 @@ class Heading:
             level=int(data.get("level", 1)),
             text=str(data.get("text", "")),
             runs=runs,
+            alignment=str(data.get("alignment", "left")),
             box=tuple(data["box"]) if data.get("box") else None,
         )
 
@@ -383,7 +386,36 @@ class PageBreak:
         return cls(page=data.get("page"))
 
 
-BlockElement = Paragraph | Heading | DisplayEquation | Table | ListBlock | PageBreak
+@dataclass(slots=True)
+class ImageBlock:
+    """An embedded image or figure reference with optional caption."""
+
+    src: str = ""
+    caption: str | None = None
+    width: float | None = None
+    box: tuple[int, int, int, int] | None = None
+    type: Literal["image"] = "image"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "image",
+            "src": self.src,
+            "caption": self.caption,
+            "width": self.width,
+            "box": self.box,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ImageBlock:
+        return cls(
+            src=str(data.get("src", "")),
+            caption=data.get("caption"),
+            width=data.get("width"),
+            box=tuple(data["box"]) if data.get("box") else None,
+        )
+
+
+BlockElement = Paragraph | Heading | DisplayEquation | Table | ListBlock | PageBreak | ImageBlock
 
 
 @dataclass(slots=True)
@@ -418,6 +450,8 @@ class Document:
                 elements.append(ListBlock.from_dict(item))
             elif t == "page_break":
                 elements.append(PageBreak.from_dict(item))
+            elif t == "image":
+                elements.append(ImageBlock.from_dict(item))
             else:
                 elements.append(Paragraph.from_dict(item))
         return cls(
@@ -433,7 +467,12 @@ class Document:
         for elem in self.elements:
             if isinstance(elem, Heading):
                 hashes = "#" * max(1, min(6, elem.level))
-                blocks.append(f"{hashes} {elem.text}")
+                if elem.alignment == "center":
+                    blocks.append(f'<p align="center">{hashes} {elem.text}</p>')
+                elif elem.alignment == "right":
+                    blocks.append(f'<p align="right">{hashes} {elem.text}</p>')
+                else:
+                    blocks.append(f"{hashes} {elem.text}")
             elif isinstance(elem, DisplayEquation):
                 blocks.append(f"$$\n{elem.latex}\n$$")
             elif isinstance(elem, Paragraph):
@@ -456,6 +495,12 @@ class Document:
                         pieces.append(text)
                 para_text = "".join(pieces).strip()
                 if para_text:
+                    if elem.alignment == "center":
+                        para_text = f"<p align=\"center\">{para_text}</p>"
+                    elif elem.alignment == "right":
+                        para_text = f"<p align=\"right\">{para_text}</p>"
+                    elif elem.alignment == "justify":
+                        para_text = f"<p align=\"justify\">{para_text}</p>"
                     blocks.append(para_text)
             elif isinstance(elem, Table):
                 table_lines = _render_table_markdown(elem)
@@ -473,6 +518,9 @@ class Document:
                     blocks.append("\n".join(list_lines))
             elif isinstance(elem, PageBreak):
                 blocks.append("\n---\n")
+            elif isinstance(elem, ImageBlock):
+                cap = elem.caption or ""
+                blocks.append(f"![{cap}]({elem.src})")
 
         return "\n\n".join(b for b in blocks if b)
 
@@ -492,13 +540,54 @@ class Document:
                 i += 1
                 continue
 
+            # Page break (--- or ***)
+            if re.match(r"^---+$", stripped) or re.match(r"^\*\*\*+$", stripped):
+                elements.append(PageBreak())
+                i += 1
+                continue
+
+            # Image (![caption](src))
+            m_img = re.match(r"^!\[(.*?)\]\((.*?)\)$", stripped)
+            if m_img:
+                caption = m_img.group(1).strip() or None
+                src = m_img.group(2).strip()
+                elements.append(ImageBlock(src=src, caption=caption))
+                i += 1
+                continue
+
             # Heading (# ...)
-            m_heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+            raw_h_line = stripped
+            h_align = "left"
+            m_outer_align = re.match(
+                r"^<(?:p\s+align=[\"'](center|right|justify)[\"']|center)>(.*?)(?:</(?:p|center)>)?$",
+                raw_h_line,
+                flags=re.IGNORECASE,
+            )
+            if m_outer_align:
+                h_align = m_outer_align.group(1).lower() if m_outer_align.group(1) else "center"
+                raw_h_line = m_outer_align.group(2).strip()
+
+            m_heading = re.match(r"^(#{1,6})\s+(.*)$", raw_h_line)
             if m_heading:
                 level = len(m_heading.group(1))
                 h_text = m_heading.group(2).strip()
+                m_inner_align = re.match(
+                    r"^<(?:p\s+align=[\"'](center|right|justify)[\"']|center)>(.*?)(?:</(?:p|center)>)?$",
+                    h_text,
+                    flags=re.IGNORECASE,
+                )
+                if m_inner_align:
+                    h_align = m_inner_align.group(1).lower() if m_inner_align.group(1) else "center"
+                    h_text = m_inner_align.group(2).strip()
+                elif h_text.startswith("->") and h_text.endswith("<-") and len(h_text) > 4:
+                    h_align = "center"
+                    h_text = h_text[2:-2].strip()
+                elif h_text.startswith("->") and len(h_text) > 2:
+                    h_align = "right"
+                    h_text = h_text[2:].strip()
+
                 runs = _parse_inline_text(h_text)
-                elements.append(Heading(level=level, text=h_text, runs=runs))
+                elements.append(Heading(level=level, text=h_text, runs=runs, alignment=h_align))
                 i += 1
                 continue
 
@@ -557,6 +646,22 @@ class Document:
                         )
                     )
                     i += 1
+
+                # Disambiguate single-item numbered lines that are actually section headings:
+                # e.g. "1. Introduction and Theoretical Foundation" or "2. Experimental Measurements"
+                if len(items) == 1 and ordered:
+                    single_text = m_bullet.group(2).strip()
+                    looks_like_heading = (
+                        bool(re.match(r"^[A-Z][A-Za-z0-9\s,:;'-]+$", single_text))
+                        and not single_text.endswith((".", ",", ";", ":"))
+                        and len(single_text) < 100
+                    )
+                    if looks_like_heading:
+                        heading_text = f"{m_bullet.group(1)} {single_text}"
+                        runs = _parse_inline_text(heading_text)
+                        elements.append(Heading(level=2, text=heading_text, runs=runs))
+                        continue
+
                 elements.append(ListBlock(items=items, ordered=ordered))
                 continue
 
@@ -567,21 +672,41 @@ class Document:
                 next_strip = lines[i].strip()
                 if not next_strip:
                     break
-                # Stop if next line is a heading, display equation, table, or list
+                # Stop if next line is a heading, display equation, table, list, page break, or image
                 if (
                     re.match(r"^#{1,6}\s+", next_strip)
                     or next_strip.startswith("$$")
                     or next_strip.startswith("\\[")
                     or "|" in next_strip
                     or re.match(r"^([-*+]|\d+\.)\s+", next_strip)
+                    or re.match(r"^---+$", next_strip)
+                    or re.match(r"^\*\*\*+$", next_strip)
+                    or next_strip.startswith("![")
                 ):
                     break
                 para_lines.append(next_strip)
                 i += 1
 
             combined = " ".join(para_lines).strip()
+            # Check for alignment tags: <p align="center">...</p>, <center>...</center>, <p align="right">...</p>
+            align = "left"
+            m_align = re.match(
+                r"^<(?:p\s+align=[\"'](center|right|justify)[\"']|center)>(.*?)(?:</(?:p|center)>)?$",
+                combined,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            if m_align:
+                align = m_align.group(1).lower() if m_align.group(1) else "center"
+                combined = m_align.group(2).strip()
+            elif combined.startswith("->") and combined.endswith("<-") and len(combined) > 4:
+                align = "center"
+                combined = combined[2:-2].strip()
+            elif combined.startswith("->") and len(combined) > 2:
+                align = "right"
+                combined = combined[2:].strip()
+
             runs = _parse_inline_text(combined)
-            elements.append(Paragraph(runs=runs))
+            elements.append(Paragraph(runs=runs, alignment=align))
 
         return cls(title=title, elements=elements)
 
@@ -688,6 +813,21 @@ class Document:
                             )
                         )
 
+                row_left = min(b.left for b, _k, _p in curr_row)
+                row_right = max(b.right for b, _k, _p in curr_row)
+                row_top = min(b.top for b, _k, _p in curr_row)
+                row_bottom = max(b.bottom for b, _k, _p in curr_row)
+                row_width = row_right - row_left
+                row_center = (row_left + row_right) / 2
+                page_center = page_width / 2
+
+                align = "left"
+                if page_width > 0:
+                    if abs(row_center - page_center) < 0.08 * page_width and row_width < 0.78 * page_width:
+                        align = "center"
+                    elif row_left > 0.55 * page_width and (page_width - row_right) < 0.15 * page_width:
+                        align = "right"
+
                 # Check if this line looks like a heading
                 plain = "".join(r.text for r in runs if isinstance(r, TextRun)).strip()
                 if (
@@ -697,9 +837,9 @@ class Document:
                     and not plain.endswith((".", ",", ";", ":"))
                     and (plain.isupper() or plain.istitle())
                 ):
-                    elements.append(Heading(level=2, text=plain, runs=runs))
+                    elements.append(Heading(level=2, text=plain, runs=runs, alignment=align, box=(int(row_left), int(row_top), int(row_right), int(row_bottom))))
                 else:
-                    elements.append(Paragraph(runs=runs))
+                    elements.append(Paragraph(runs=runs, alignment=align, box=(int(row_left), int(row_top), int(row_right), int(row_bottom))))
 
             row_idx += 1
 

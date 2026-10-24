@@ -501,3 +501,144 @@ def test_end_to_end_ocr_to_docx_pipeline(tmp_path: Path) -> None:
         assert res.returncode == 0
         pdf_file = tmp_path / "end_to_end_result.pdf"
         assert pdf_file.exists() and pdf_file.stat().st_size > 0
+
+
+# 16. Regression: Markdown editor edits must override stale document dict
+def test_markdown_editor_edits_override_stale_document_object(tmp_path: Path) -> None:
+    stale_doc = Document(
+        title="Stale Document",
+        elements=[Paragraph(runs=[TextRun(text="OLD STALE UNEDITED OCR CONTENT")])],
+    )
+    edited_markdown = "# Edited Title\n\nNEW EDITED USER CONTENT in paragraph."
+
+    response = client.post(
+        "/api/export/docx",
+        json={
+            "title": "Edited Title",
+            "markdown": edited_markdown,
+            "document": stale_doc.to_dict(),
+            "save_to_downloads": False,
+        },
+    )
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+
+    assert "NEW EDITED USER CONTENT" in xml
+    assert "OLD STALE UNEDITED OCR CONTENT" not in xml
+
+
+# 17. Regression: Markdown page break preservation
+def test_markdown_page_break_preservation(tmp_path: Path) -> None:
+    markdown = "Page 1 Content\n\n---\n\nPage 2 Content"
+    doc = Document.from_markdown(markdown)
+    output = tmp_path / "page_break_test.docx"
+    build_docx_from_document(doc, output)
+
+    xml = _read_docx_xml(output)
+    assert "w:br" in xml
+    assert "Page 1 Content" in xml
+    assert "Page 2 Content" in xml
+
+
+# 18. ImageBlock embedding
+def test_image_block_export(tmp_path: Path) -> None:
+    from PIL import Image
+    from backend.document import ImageBlock
+
+    img_path = tmp_path / "test_figure.png"
+    img = Image.new("RGB", (100, 100), color="blue")
+    img.save(img_path)
+
+    doc = Document(
+        title="Image Test",
+        elements=[
+            Heading(level=1, text="Figure Section"),
+            ImageBlock(src=str(img_path), caption="A test figure caption"),
+        ],
+    )
+    output = tmp_path / "image_test.docx"
+    warnings = build_docx_from_document(doc, output)
+    assert len(warnings) == 0
+
+    with zipfile.ZipFile(output) as zf:
+        namelist = zf.namelist()
+        assert any(n.startswith("word/media/") for n in namelist)
+        xml = zf.read("word/document.xml").decode("utf-8")
+        assert "Figure: A test figure caption" in xml
+
+
+# 19. All four template presets verification
+@pytest.mark.parametrize("preset", ["academic_textbook", "research_paper", "standard", "preserve_layout"])
+def test_all_four_template_presets(tmp_path: Path, preset: str) -> None:
+    doc = Document(
+        title=f"Test {preset} Document",
+        elements=[
+            Heading(level=1, text=f"Heading in {preset}"),
+            Paragraph(runs=[TextRun(text=f"Body paragraph for {preset} with equation "), InlineEquation(latex=r"\alpha + \beta = \gamma")]),
+            DisplayEquation(latex=r"\int_0^\infty e^{-x^2} \, dx = \frac{\sqrt{\pi}}{2}"),
+            Table(
+                rows=[
+                    TableRow(cells=[TableCell(elements=[Paragraph(runs=[TextRun(text="Col A", bold=True)])]), TableCell(elements=[Paragraph(runs=[TextRun(text="Col B", bold=True)])])], is_header=True),
+                    TableRow(cells=[TableCell(elements=[Paragraph(runs=[TextRun(text="Val 1")])]), TableCell(elements=[Paragraph(runs=[InlineEquation(latex=r"\frac{1}{2}")])])]),
+                ]
+            ),
+        ],
+    )
+    output = tmp_path / f"{preset}_output.docx"
+    warnings = build_docx_from_document(doc, output, template=preset)
+    assert len(warnings) == 0
+    assert output.exists()
+
+    with zipfile.ZipFile(output) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+        assert "m:oMath" in xml
+        assert "<w:tbl" in xml
+
+        # Verify footer contains page numbering
+        footers = [f for f in zf.namelist() if f.startswith("word/footer")]
+        assert len(footers) > 0
+        footer_xml = zf.read(footers[0]).decode("utf-8")
+        assert 'w:instr="PAGE"' in footer_xml
+
+    # Verify LibreOffice can convert it to PDF
+    if shutil.which("libreoffice"):
+        cmd = ["libreoffice", "--headless", "--convert-to", "pdf", str(output), "--outdir", str(tmp_path)]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0
+        pdf_file = tmp_path / f"{preset}_output.pdf"
+        assert pdf_file.exists() and pdf_file.stat().st_size > 0
+
+
+# 20. Real frontend API binary download flow
+def test_api_binary_docx_download_headers() -> None:
+    payload = {
+        "title": "Quantum Physics Notes",
+        "markdown": "# Quantum Physics\n\nEnergy relation:\n\n$$\nE = h\\nu\n$$\n",
+        "template": "academic_textbook",
+        "save_to_downloads": False,
+    }
+    response = client.post("/api/export/docx", json=payload)
+    assert response.status_code == 200
+    assert "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in response.headers["content-type"]
+    assert "attachment;" in response.headers["content-disposition"]
+    assert ".docx" in response.headers["content-disposition"]
+
+    # Verify response body is a valid DOCX ZIP package
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        namelist = zf.namelist()
+        assert "[Content_Types].xml" in namelist
+        assert "word/document.xml" in namelist
+        xml = zf.read("word/document.xml").decode("utf-8")
+        assert "m:oMath" in xml
+
+
+# 21. Error handling does not return binary
+def test_api_error_handling_does_not_return_binary() -> None:
+    # Empty request
+    response = client.post("/api/export/docx", json={"title": "Empty", "save_to_downloads": False})
+    assert response.status_code == 422
+    assert "application/json" in response.headers["content-type"]
+    err = response.json()
+    assert "detail" in err
+

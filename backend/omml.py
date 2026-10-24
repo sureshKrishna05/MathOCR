@@ -39,6 +39,55 @@ def find_pandoc_binary() -> str | None:
     return find_pandoc()
 
 
+def sanitize_latex_for_pandoc(latex: str) -> str:
+    """Normalize LaTeX formulas for Pandoc's texmath OMML generator.
+
+    Fixes common OCR macros that Pandoc's texmath reader does not support:
+    - Continued/display fractions (\\cfrac, \\dfrac, \\tfrac) -> \\frac
+    - Font sizing commands in math mode (\\scriptsize, \\footnotesize, \\tiny, etc.)
+    - Text styling commands in math mode (\\textbf -> \\mathbf, \\textit -> \\mathit)
+    - Variant Greek letters (\\varDelta -> \\Delta, \\varOmega -> \\Omega)
+    - Non-breaking spaces and tildes inside brackets/scripts
+    - Label and tag macros (\\label{...}, \\tag{...}, \\nonumber)
+    """
+    if not latex:
+        return ""
+    cleaned = clean_latex(latex).strip()
+    if not cleaned:
+        return ""
+
+    # 1. Fractions: convert \cfrac, \dfrac, \tfrac to \frac
+    cleaned = re.sub(r"\\(?:cfrac|dfrac|tfrac)\b", r"\\frac", cleaned)
+
+    # 2. Font sizing: strip font-size commands that fail in Pandoc math mode
+    cleaned = re.sub(
+        r"\\(?:scriptsize|footnotesize|tiny|small|normalsize|large|Large|LARGE|huge|Huge)\b\s*",
+        "",
+        cleaned,
+    )
+
+    # 3. Bold/italic text in math: \textbf -> \mathbf, \textit -> \mathit
+    cleaned = re.sub(r"\\textbf\b", r"\\mathbf", cleaned)
+    cleaned = re.sub(r"\\textit\b", r"\\mathit", cleaned)
+
+    # 4. Greek variations: \varDelta -> \Delta, \varOmega -> \Omega, etc.
+    cleaned = re.sub(r"\\var([A-Z][a-z]+)\b", r"\\\1", cleaned)
+
+    # 5. Normalize TeX primitive sub/superscripts: \sb -> _, \sp -> ^
+    cleaned = re.sub(r"\\sb(?=\\[a-zA-Z]|[^a-zA-Z]|$)", "_", cleaned)
+    cleaned = re.sub(r"\\sp(?=\\[a-zA-Z]|[^a-zA-Z]|$)", "^", cleaned)
+
+    # 6. Clean up non-breaking spaces or tildes inside brackets/scripts
+    cleaned = re.sub(r"(?<=[_{^])\s*~\s*", " ", cleaned)
+    cleaned = re.sub(r"~\s*(?=[_}\^])", " ", cleaned)
+
+    # 7. Strip LaTeX labels, tags, and nonumber
+    cleaned = re.sub(r"\\(?:tag|label)\{[^}]*\}", "", cleaned)
+    cleaned = re.sub(r"\\nonumber\b", "", cleaned)
+
+    return cleaned.strip()
+
+
 def validate_equation(latex: str, pandoc_path: str | None = None) -> tuple[bool, str | None]:
     """Check if a LaTeX equation can be parsed into native MathML / OMML.
 
@@ -58,7 +107,7 @@ def latex_to_omml(
     Returns (etree._Element, None) on success, or (None, error_detail) on failure.
     Cached in memory to accelerate duplicate expressions.
     """
-    cleaned = clean_latex(latex).strip()
+    cleaned = sanitize_latex_for_pandoc(latex)
     if not cleaned:
         return None, "Empty mathematical expression"
 

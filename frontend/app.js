@@ -22,16 +22,16 @@ const ENGINE_SHORT_NAMES = {
 
 const translations = {
   en: {
-    pageTitle: "MathOCR by Bouronikos Christos",
-    brandBy: "by Bouronikos Christos",
+    pageTitle: "MyKind — Academic Document & Math to Word",
+    brandBy: "Document & Math to Word",
     refreshPage: "Refresh",
     updateTitle: "A new version is available",
-    updateDetail: "MathOCR {{latest}} is available — you have {{current}}.",
+    updateDetail: "MyKind {{latest}} is available — you have {{current}}.",
     updateNotes: "Release notes ↗",
     updateNow: "Update now",
     updateDownload: "Download ↗",
-    updateStartedWin: "Installer launched. MathOCR will now close to finish updating.",
-    updateStartedMac: "Update downloaded to your Downloads folder. Drag MathOCR into Applications to replace the old version, then reopen it.",
+    updateStartedWin: "Installer launched. MyKind will now close to finish updating.",
+    updateStartedMac: "Update downloaded to your Downloads folder. Drag MyKind into Applications to replace the old version, then reopen it.",
     updateFailed: "The update could not be downloaded — try again or download it from GitHub.",
     checkUpdates: "Check for updates",
     checkingUpdates: "Checking for updates…",
@@ -41,11 +41,11 @@ const translations = {
     serviceReady: "Local engine ready",
     serviceNoPandoc: "OCR ready · Pandoc missing",
     serviceOffline: "Engine offline",
-    eyebrow: "LOCAL MATHEMATICS OCR",
-    introTitle: "Images and PDFs into editable equations.",
-    introCopy: "Drop a file, review the LaTeX, export editable Word equations. Everything runs on your computer.",
+    eyebrow: "ACADEMIC DOCUMENT & MATH OCR",
+    introTitle: "Images and PDFs into editable Word documents.",
+    introCopy: "Drop a file, review the reconstructed document, and export editable Word equations. Everything runs locally on your computer.",
     engineBannerTitle: "The local engine is not running.",
-    engineBannerCopy: "Recognition happens on your computer, so MathOCR needs its engine.",
+    engineBannerCopy: "Recognition happens on your computer, so the local engine must be running.",
     engineBannerAction: "Get the desktop app",
     dropFiles: "Drop images or PDFs here",
     browseFiles: "click to browse, or paste a screenshot (Ctrl+V) · PNG, JPG, WEBP, TIFF, PDF",
@@ -63,18 +63,18 @@ const translations = {
     docNougat: "Nougat — English papers",
     docNougatUnavailable: "Nougat — download it below first",
     pageLimit: "PDF page limit",
-    recognize: "Recognize mathematics",
+    recognize: "Recognize document & mathematics",
     engineAddress: "Advanced: engine address",
     checkConnection: "Check connection",
     connectionInitial: "Start the local engine to enable recognition and Word export.",
-    filesStayLocal: "Files are sent only to the MathOCR engine on this computer.",
+    filesStayLocal: "Files are sent only to the local engine on this computer.",
     installPandoc: "OCR works, but Pandoc is required for Word export.",
     startEngine: "Start the local engine to enable recognition and Word export.",
-    readingMath: "Reading mathematics…",
+    readingMath: "Reading document & mathematics…",
     processingNote: "The first run loads the model into memory and can take a minute or two; later runs are much faster.",
     loadingModel: "Preparing your first recognition…",
     processingFirstRun: "Loading models if needed · {{elapsed}} elapsed. The first run can take a minute or two.",
-    processingElapsed: "Recognizing mathematics · {{elapsed}} elapsed. Keep MathOCR open while it works.",
+    processingElapsed: "Recognizing document · {{elapsed}} elapsed. Keep the window open while it works.",
     processingStillWorking: "Still recognizing · {{elapsed}} elapsed. Large pages and cross-checking take longer.",
     reconstructedDocument: "Reconstructed document",
     documentHint: "Edit the text and math below, then export the whole document to Word.",
@@ -82,7 +82,7 @@ const translations = {
     downloadDocWord: "Download document (Word)",
     editableDocument: "Editable document text and LaTeX",
     documentCopied: "Document text copied",
-    documentTitle: "MathOCR document",
+    documentTitle: "MyKind Document",
     recognizedEquations: "Recognized equations",
     resultsOne: "1 equation found. Edit the LaTeX and the preview updates live.",
     resultsMany: "{{count}} equations found. Edit the LaTeX and the preview updates live.",
@@ -107,6 +107,11 @@ const translations = {
     buildingWord: "Building Word…",
     wordFailed: "Word export failed",
     wordCreated: "Editable Word document created",
+    docStyle: "Document Style",
+    styleAcademic: "Academic Textbook",
+    styleResearch: "Research Paper",
+    styleStandard: "Standard Editable Document",
+    stylePreserve: "Preserve Original Layout",
     savedTo: "Saved to {{path}}",
     texTitle: "MathOCR equations",
     unsupportedFile: "{{name}}: unsupported file type",
@@ -160,16 +165,16 @@ const translations = {
     footerMadeWith: "made for students, teachers, and researchers",
   },
   el: {
-    pageTitle: "MathOCR από τον Χρήστο Μπουρονίκο",
-    brandBy: "από τον Χρήστο Μπουρονίκο",
+    pageTitle: "MyKind — Έγγραφα & Μαθηματικά σε Word",
+    brandBy: "Έγγραφα & Μαθηματικά σε Word",
     refreshPage: "Ανανέωση",
     updateTitle: "Διαθέσιμη νέα έκδοση",
-    updateDetail: "Η έκδοση MathOCR {{latest}} είναι διαθέσιμη — έχετε την {{current}}.",
+    updateDetail: "Η έκδοση MyKind {{latest}} είναι διαθέσιμη — έχετε την {{current}}.",
     updateNotes: "Σημειώσεις έκδοσης ↗",
     updateNow: "Ενημέρωση τώρα",
     updateDownload: "Λήψη ↗",
-    updateStartedWin: "Ο εγκαταστάτης ξεκίνησε. Το MathOCR θα κλείσει τώρα για να ολοκληρωθεί η ενημέρωση.",
-    updateStartedMac: "Η ενημέρωση κατέβηκε στον φάκελο Λήψεις. Σύρετε το MathOCR στις Εφαρμογές για να αντικαταστήσετε την παλιά έκδοση και ανοίξτε το ξανά.",
+    updateStartedWin: "Ο εγκαταστάτης ξεκίνησε. Το MyKind θα κλείσει τώρα για να ολοκληρωθεί η ενημέρωση.",
+    updateStartedMac: "Η ενημέρωση κατέβηκε στον φάκελο Λήψεις. Σύρετε το MyKind στις Εφαρμογές για να αντικαταστήσετε την παλιά έκδοση και ανοίξτε το ξανά.",
     updateFailed: "Η ενημέρωση δεν κατέβηκε — δοκιμάστε ξανά ή κατεβάστε την από το GitHub.",
     checkUpdates: "Έλεγχος για ενημερώσεις",
     checkingUpdates: "Έλεγχος για ενημερώσεις…",
@@ -179,11 +184,11 @@ const translations = {
     serviceReady: "Η τοπική μηχανή είναι έτοιμη",
     serviceNoPandoc: "OCR έτοιμο · λείπει το Pandoc",
     serviceOffline: "Μηχανή εκτός λειτουργίας",
-    eyebrow: "ΤΟΠΙΚΗ ΑΝΑΓΝΩΡΙΣΗ ΜΑΘΗΜΑΤΙΚΩΝ",
-    introTitle: "Εικόνες και PDF σε επεξεργάσιμες εξισώσεις.",
-    introCopy: "Αφήστε ένα αρχείο, ελέγξτε το LaTeX, εξαγάγετε επεξεργάσιμες εξισώσεις Word. Όλα εκτελούνται στον υπολογιστή σας.",
+    eyebrow: "ΤΟΠΙΚΗ ΑΝΑΓΝΩΡΙΣΗ ΕΓΓΡΑΦΩΝ & ΜΑΘΗΜΑΤΙΚΩΝ",
+    introTitle: "Εικόνες και PDF σε επεξεργάσιμα έγγραφα Word.",
+    introCopy: "Αφήστε ένα αρχείο, ελέγξτε το ανακατασκευασμένο έγγραφο και εξαγάγετε σε Word με φυσικές εξισώσεις. Όλα εκτελούνται τοπικά στον υπολογιστή σας.",
     engineBannerTitle: "Η τοπική μηχανή δεν εκτελείται.",
-    engineBannerCopy: "Η αναγνώριση γίνεται στον υπολογιστή σας, οπότε το MathOCR χρειάζεται τη μηχανή του.",
+    engineBannerCopy: "Η αναγνώριση γίνεται στον υπολογιστή σας, οπότε η τοπική μηχανή πρέπει να εκτελείται.",
     engineBannerAction: "Κατεβάστε την εφαρμογή",
     dropFiles: "Σύρετε εδώ εικόνες ή PDF",
     browseFiles: "κλικ για επιλογή, ή επικόλληση στιγμιότυπου (Ctrl+V) · PNG, JPG, WEBP, TIFF, PDF",
@@ -201,18 +206,18 @@ const translations = {
     docNougat: "Nougat — αγγλικές εργασίες",
     docNougatUnavailable: "Nougat — κατεβάστε το πρώτα πιο κάτω",
     pageLimit: "Όριο σελίδων PDF",
-    recognize: "Αναγνώριση μαθηματικών",
+    recognize: "Αναγνώριση εγγράφου & μαθηματικών",
     engineAddress: "Για προχωρημένους: διεύθυνση μηχανής",
     checkConnection: "Έλεγχος σύνδεσης",
     connectionInitial: "Εκκινήστε την τοπική μηχανή για αναγνώριση και εξαγωγή Word.",
-    filesStayLocal: "Τα αρχεία αποστέλλονται μόνο στη μηχανή MathOCR αυτού του υπολογιστή.",
+    filesStayLocal: "Τα αρχεία αποστέλλονται μόνο στην τοπική μηχανή αυτού του υπολογιστή.",
     installPandoc: "Το OCR λειτουργεί, αλλά για εξαγωγή Word απαιτείται το Pandoc.",
     startEngine: "Εκκινήστε την τοπική μηχανή για αναγνώριση και εξαγωγή Word.",
-    readingMath: "Ανάγνωση μαθηματικών…",
+    readingMath: "Ανάγνωση εγγράφου & μαθηματικών…",
     processingNote: "Η πρώτη εκτέλεση φορτώνει το μοντέλο στη μνήμη και μπορεί να πάρει ένα-δύο λεπτά· οι επόμενες είναι πολύ πιο γρήγορες.",
     loadingModel: "Προετοιμασία πρώτης αναγνώρισης…",
     processingFirstRun: "Φόρτωση μοντέλων αν χρειάζεται · {{elapsed}}. Η πρώτη εκτέλεση μπορεί να πάρει ένα-δύο λεπτά.",
-    processingElapsed: "Αναγνώριση μαθηματικών · {{elapsed}}. Κρατήστε το MathOCR ανοικτό όσο λειτουργεί.",
+    processingElapsed: "Αναγνώριση εγγράφου · {{elapsed}}. Κρατήστε το παράθυρο ανοικτό όσο λειτουργεί.",
     processingStillWorking: "Η αναγνώριση συνεχίζεται · {{elapsed}}. Οι μεγάλες σελίδες και η διασταύρωση χρειάζονται περισσότερο χρόνο.",
     reconstructedDocument: "Ανακατασκευασμένο έγγραφο",
     documentHint: "Επεξεργαστείτε το κείμενο και τα μαθηματικά και εξαγάγετε όλο το έγγραφο σε Word.",
@@ -220,7 +225,7 @@ const translations = {
     downloadDocWord: "Λήψη εγγράφου (Word)",
     editableDocument: "Επεξεργάσιμο κείμενο εγγράφου και LaTeX",
     documentCopied: "Το κείμενο του εγγράφου αντιγράφηκε",
-    documentTitle: "Έγγραφο MathOCR",
+    documentTitle: "Έγγραφο MyKind",
     recognizedEquations: "Αναγνωρισμένες εξισώσεις",
     resultsOne: "Βρέθηκε 1 εξίσωση. Επεξεργαστείτε το LaTeX και η προεπισκόπηση ενημερώνεται άμεσα.",
     resultsMany: "Βρέθηκαν {{count}} εξισώσεις. Επεξεργαστείτε το LaTeX και η προεπισκόπηση ενημερώνεται άμεσα.",
@@ -245,6 +250,11 @@ const translations = {
     buildingWord: "Δημιουργία Word…",
     wordFailed: "Η εξαγωγή Word απέτυχε",
     wordCreated: "Το επεξεργάσιμο έγγραφο Word δημιουργήθηκε",
+    docStyle: "Στυλ εγγράφου",
+    styleAcademic: "Ακαδημαϊκό σύγγραμμα",
+    styleResearch: "Επιστημονικό άρθρο",
+    styleStandard: "Τυπικό επεξεργάσιμο έγγραφο",
+    stylePreserve: "Διατήρηση αρχικής διάταξης",
     savedTo: "Αποθηκεύτηκε στο {{path}}",
     texTitle: "Εξισώσεις MathOCR",
     unsupportedFile: "{{name}}: μη υποστηριζόμενος τύπος αρχείου",
@@ -335,6 +345,7 @@ const elements = {};
 for (const id of [
   "apiUrl", "connectionHelp", "copyAllButton", "copyDocButton", "deleteAllModelsButton",
   "downloadModelsButton", "downloadDocWordButton", "downloadTexButton", "downloadWordButton",
+  "docTemplate",
   "dropZone", "engineBanner", "engineBannerLink", "advancedSettings", "docEngine", "docEngineField",
   "documentList", "documentSection", "ensembleAdvice", "fileInput", "fileList", "footerVersion", "mathEngine",
   "pageLimit", "progressPanel", "recognitionMode", "recognizeButton", "recheckButton", "refreshPageButton",
@@ -363,8 +374,8 @@ function applyLanguage(language) {
   renderFiles();
   renderStorage();
   renderUpdateBanner();
-  if (!elements.documentSection.hidden) renderDocuments();
-  if (!elements.resultsSection.hidden) renderResults(false);
+  if (elements.documentSection && !elements.documentSection.hidden) renderDocuments();
+  if (elements.resultsSection && !elements.resultsSection.hidden) renderResults(false);
   if (state.busy) updateRecognitionProgress();
 }
 
@@ -618,9 +629,18 @@ async function recognize() {
     if (!response.ok) throw new Error(payload.detail || t("recognitionHttpFailed", { status: response.status }));
     state.results = payload.results || [];
     state.documents = payload.documents || [];
+    if (!state.documents.length && state.results.length) {
+      const mathMarkdown = state.results.map((r) => `$$\n${r.latex}\n$$`).join("\n\n");
+      state.documents = [{
+        source: state.results[0]?.source || "Equations",
+        markdown: mathMarkdown,
+      }];
+    }
     state.hasCompletedRecognition = true;
     renderDocuments();
-    renderResults();
+    if (elements.resultsSection) {
+      renderResults();
+    }
     (payload.warnings || []).forEach((warning) => showToast(warning));
     if (!payload.warnings || !payload.warnings.length) {
       showToast(state.results.length === 1 ? t("foundOne") : t("foundMany", { count: state.results.length }));
@@ -657,12 +677,15 @@ function confidenceChip(confidence) {
 }
 
 function renderResults(shouldScroll = true) {
+  if (!elements.resultsSection || !elements.resultList) return;
   elements.resultList.replaceChildren();
   elements.resultsSection.hidden = false;
-  elements.ensembleAdvice.hidden = !state.results.length;
-  elements.resultsSummary.textContent = state.results.length
-    ? `${state.results.length === 1 ? t("resultsOne") : t("resultsMany", { count: state.results.length })} ${t("reviewReminder")}`
-    : t("noEquationsDetected");
+  if (elements.ensembleAdvice) elements.ensembleAdvice.hidden = !state.results.length;
+  if (elements.resultsSummary) {
+    elements.resultsSummary.textContent = state.results.length
+      ? `${state.results.length === 1 ? t("resultsOne") : t("resultsMany", { count: state.results.length })} ${t("reviewReminder")}`
+      : t("noEquationsDetected");
+  }
 
   state.results.forEach((result, index) => {
     const card = document.createElement("article");
@@ -744,20 +767,62 @@ function renderResults(shouldScroll = true) {
 /* ---------- document reconstruction view ---------- */
 
 // Render Markdown (paragraphs + tables + headings + $inline$ / $$display$$ math)
+function _renderInlineContent(text, container) {
+  const parts = text.split(/(\$[^$]+\$)/);
+  for (const part of parts) {
+    const inline = part.match(/^\$([^$]+)\$$/);
+    if (inline && window.katex) {
+      const span = document.createElement("span");
+      try {
+        window.katex.render(inline[1], span, { displayMode: false, throwOnError: false, strict: "ignore" });
+      } catch (_error) {
+        span.textContent = part;
+      }
+      container.append(span);
+    } else if (part) {
+      container.append(document.createTextNode(part));
+    }
+  }
+}
+
+// Minimal, safe Markdown renderer: turns headings, equations, tables, and paragraphs
 // into an element. No external Markdown library is needed for this preview.
 function renderMarkdownPreview(markdown, target) {
   target.replaceChildren();
   const blocks = markdown.split(/\n{2,}/);
   for (const block of blocks) {
-    const trimmed = block.trim();
+    let trimmed = block.trim();
     if (!trimmed) continue;
+
+    // Check alignment tag: <p align="center">...</p>, <center>...</center>, ->...<-
+    let blockAlign = null;
+    const alignMatch = trimmed.match(/^<(?:p\s+align=["'](center|right|justify)["']|center)>([\s\S]*?)(?:<\/(?:p|center)>)?$/i);
+    if (alignMatch) {
+      blockAlign = alignMatch[1] ? alignMatch[1].toLowerCase() : "center";
+      trimmed = alignMatch[2].trim();
+    } else if (trimmed.startsWith("->") && trimmed.endsWith("<-") && trimmed.length > 4) {
+      blockAlign = "center";
+      trimmed = trimmed.slice(2, -2).trim();
+    } else if (trimmed.startsWith("->") && trimmed.length > 2) {
+      blockAlign = "right";
+      trimmed = trimmed.slice(2).trim();
+    }
 
     // Headings
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       const hLevel = headingMatch[1].length;
       const hElem = document.createElement(`h${Math.min(hLevel + 1, 6)}`);
-      hElem.textContent = headingMatch[2];
+      let hText = headingMatch[2].trim();
+      const innerAlign = hText.match(/^<(?:p\s+align=["'](center|right|justify)["']|center)>([\s\S]*?)(?:<\/(?:p|center)>)?$/i);
+      if (innerAlign) {
+        blockAlign = innerAlign[1] ? innerAlign[1].toLowerCase() : "center";
+        hText = innerAlign[2].trim();
+      }
+      _renderInlineContent(hText, hElem);
+      if (blockAlign) {
+        hElem.style.textAlign = blockAlign;
+      }
       target.append(hElem);
       continue;
     }
@@ -773,6 +838,21 @@ function renderMarkdownPreview(markdown, target) {
         wrapper.textContent = trimmed;
       }
       target.append(wrapper);
+      continue;
+    }
+
+    // Bullet lists
+    if (/^[-*+]\s+/.test(trimmed)) {
+      const ul = document.createElement("ul");
+      trimmed.split("\n").forEach((itemLine) => {
+        const itemTrim = itemLine.trim();
+        if (/^[-*+]\s+/.test(itemTrim)) {
+          const li = document.createElement("li");
+          _renderInlineContent(itemTrim.replace(/^[-*+]\s+/, ""), li);
+          ul.append(li);
+        }
+      });
+      target.append(ul);
       continue;
     }
 
@@ -792,22 +872,7 @@ function renderMarkdownPreview(markdown, target) {
           const cells = cleanLine.split("|");
           cells.forEach((cell) => {
             const cellElem = document.createElement(idx === 0 ? "th" : "td");
-            const cellText = cell.trim();
-            const parts = cellText.split(/(\$[^$]+\$)/);
-            for (const part of parts) {
-              const inline = part.match(/^\$([^$]+)\$$/);
-              if (inline && window.katex) {
-                const span = document.createElement("span");
-                try {
-                  window.katex.render(inline[1], span, { displayMode: false, throwOnError: false, strict: "ignore" });
-                } catch (_error) {
-                  span.textContent = part;
-                }
-                cellElem.append(span);
-              } else if (part) {
-                cellElem.append(document.createTextNode(part));
-              }
-            }
+            _renderInlineContent(cell.trim(), cellElem);
             tr.append(cellElem);
           });
           tbody.append(tr);
@@ -819,21 +884,10 @@ function renderMarkdownPreview(markdown, target) {
     }
 
     const paragraph = document.createElement("p");
-    const parts = trimmed.split(/(\$[^$]+\$)/);
-    for (const part of parts) {
-      const inline = part.match(/^\$([^$]+)\$$/);
-      if (inline && window.katex) {
-        const span = document.createElement("span");
-        try {
-          window.katex.render(inline[1], span, { displayMode: false, throwOnError: false, strict: "ignore" });
-        } catch (_error) {
-          span.textContent = part;
-        }
-        paragraph.append(span);
-      } else if (part) {
-        paragraph.append(document.createTextNode(part));
-      }
+    if (blockAlign) {
+      paragraph.style.textAlign = blockAlign;
     }
+    _renderInlineContent(trimmed, paragraph);
     target.append(paragraph);
   }
 }
@@ -866,10 +920,87 @@ function renderDocuments() {
     });
     list.append(card);
   });
+  elements.documentSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function documentMarkdown() {
-  return state.documents.map((doc) => doc.markdown.trim()).filter(Boolean).join("\n\n");
+  const editors = document.querySelectorAll(".document-editor");
+  if (editors.length) {
+    return Array.from(editors).map((el) => el.value.trim()).filter(Boolean).join("\n\n---\n\n");
+  }
+  return state.documents.map((doc) => doc.markdown.trim()).filter(Boolean).join("\n\n---\n\n");
+}
+
+async function triggerDocxDownload(body, defaultFilename) {
+  const saveToDownloads = isDesktop;
+  const response = await fetch(`${normalizedApiUrl()}/api/export/docx`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, save_to_downloads: saveToDownloads }),
+  });
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+  if (!response.ok) {
+    let errorDetail = "";
+    if (contentType.includes("application/json")) {
+      const errJson = await response.json().catch(() => ({}));
+      errorDetail = errJson.detail || "";
+    } else {
+      errorDetail = await response.text().catch(() => "");
+    }
+    throw new Error(errorDetail || t("wordFailed"));
+  }
+
+  // Desktop save to local Downloads folder
+  if (contentType.includes("application/json")) {
+    const payload = await response.json();
+    savedToast(payload);
+    return;
+  }
+
+  // Browser download: binary DOCX stream
+  const blob = await response.blob();
+  let filename = defaultFilename || "MyKind Document.docx";
+  const disposition = response.headers.get("content-disposition");
+  if (disposition) {
+    const matchUtf8 = disposition.match(/filename\*=utf-8''([^;\r\n]+)/i);
+    if (matchUtf8) {
+      try {
+        filename = decodeURIComponent(matchUtf8[1]);
+      } catch (_) {
+        filename = matchUtf8[1];
+      }
+    } else {
+      const matchPlain = disposition.match(/filename="?([^";\r\n]+)"?/i);
+      if (matchPlain) {
+        filename = matchPlain[1];
+      }
+    }
+  }
+
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+
+  const warningsHeader = response.headers.get("x-export-warnings");
+  let warnings = [];
+  if (warningsHeader) {
+    try {
+      warnings = JSON.parse(warningsHeader);
+    } catch (_) {}
+  }
+
+  if (warnings && warnings.length > 0) {
+    showToast(`${t("wordCreated")} (${warnings.length} warning(s))`);
+  } else {
+    showToast(t("wordCreated"));
+  }
 }
 
 async function downloadDocumentWord() {
@@ -880,14 +1011,11 @@ async function downloadDocumentWord() {
   button.disabled = true;
   button.textContent = t("buildingWord");
   try {
-    const response = await fetch(`${normalizedApiUrl()}/api/export/docx`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: t("documentTitle"), markdown, save_to_downloads: true }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || t("wordFailed"));
-    savedToast(payload);
+    const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
+    await triggerDocxDownload(
+      { title: t("documentTitle"), markdown, template },
+      `MyKind Document.docx`
+    );
   } catch (error) {
     showToast(error.message || t("wordFailed"));
   } finally {
@@ -948,14 +1076,11 @@ async function downloadWord() {
   elements.downloadWordButton.disabled = true;
   elements.downloadWordButton.textContent = t("buildingWord");
   try {
-    const response = await fetch(`${normalizedApiUrl()}/api/export/docx`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: t("texTitle"), equations, save_to_downloads: true }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || t("wordFailed"));
-    savedToast(payload);
+    const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
+    await triggerDocxDownload(
+      { title: t("texTitle"), equations, template },
+      `MathOCR equations by Bouronikos Christos.docx`
+    );
   } catch (error) {
     showToast(error.message || t("wordFailed"));
   } finally {
@@ -1204,9 +1329,9 @@ elements.apiUrl.addEventListener("change", () => {
   localStorage.setItem("mathocr-api-url", normalizedApiUrl());
   checkService();
 });
-elements.copyAllButton.addEventListener("click", () => copyText(activeLatex().join("\n\n"), t("allLatexCopied")));
-elements.downloadTexButton.addEventListener("click", downloadTex);
-elements.downloadWordButton.addEventListener("click", downloadWord);
+elements.copyAllButton?.addEventListener("click", () => copyText(activeLatex().join("\n\n"), t("allLatexCopied")));
+elements.downloadTexButton?.addEventListener("click", downloadTex);
+elements.downloadWordButton?.addEventListener("click", downloadWord);
 elements.downloadModelsButton.addEventListener("click", downloadModels);
 armConfirm(elements.deleteAllModelsButton, () => deleteModels(null));
 document.querySelectorAll("[data-language]").forEach((button) => {
