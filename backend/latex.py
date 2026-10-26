@@ -103,7 +103,7 @@ def _repetition_penalty(latex: str) -> float:
     if len(tokens) < 24:
         return 1.0
     worst = 1.0
-    for window in (1, 2, 3, 4, 6, 8):
+    for window in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
         run_length = 1
         longest = 1
         for index in range(window, len(tokens)):
@@ -112,12 +112,24 @@ def _repetition_penalty(latex: str) -> float:
                 longest = max(longest, run_length)
             else:
                 run_length = 1
-        # `longest` counts token repeats; a phrase repeated more than four
+        # `longest` counts token repeats; a phrase repeated more than three
         # times in a row is almost never real mathematics.
         repeats = longest / window
-        if repeats >= 5:
-            worst = min(worst, max(0.0, 1.0 - (repeats - 4) * 0.2))
-    return worst
+        if repeats >= 4:
+            worst = min(worst, max(0.0, 1.0 - (repeats - 3) * 0.25))
+
+    # Also detect command token frequency spikes from degenerate decoder loops
+    commands = [t for t in tokens if t.startswith("\\") and t not in (r"\,", r"\;", r"\:", r"\!")]
+    if len(commands) >= 10:
+        from collections import Counter
+
+        counts = Counter(commands)
+        for _, count in counts.most_common(2):
+            frac = count / len(commands)
+            if count >= 6 and frac >= 0.35:
+                worst = min(worst, max(0.0, 1.0 - (frac - 0.30) * 2.5))
+
+    return max(0.0, min(1.0, worst))
 
 
 def structure_score(latex: str) -> float:

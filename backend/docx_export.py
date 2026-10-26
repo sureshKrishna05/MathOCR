@@ -90,14 +90,44 @@ class TemplateConfig:
     header_right: bool
     show_footer: bool
     footer_format: str  # "em_dash" | "page_right" | "page_of_total"
+    equation_image_fallback_threshold: float = 0.8
+
+
+def should_fallback_to_image(
+    equation: DisplayEquation | InlineEquation,
+    threshold: float = 0.8,
+    omml_elem: Any | None = None,
+) -> tuple[bool, str | None]:
+    """Centralize the decision that determines whether an equation is exported as editable OMML
+    or preserved as a source-image crop.
+
+    Returns:
+        (should_fallback: bool, reason: str | None)
+    """
+    if getattr(equation, "fallback_image", False):
+        return True, "marked for image fallback"
+
+    if getattr(equation, "error", None) is not None:
+        return True, f"equation error: {equation.error}"
+
+    conf = getattr(equation, "confidence", None)
+    if conf is not None and conf < threshold:
+        return True, f"confidence ({conf:.2f}) below threshold ({threshold:.2f})"
+
+    if omml_elem is None and not getattr(equation, "omml", None) and not getattr(equation, "latex", None):
+        return True, "empty formula content"
+
+    return False, None
 
 
 def get_template_config(
     preset: TemplatePreset = "academic_textbook",
     metadata: dict[str, Any] | None = None,
+    equation_image_fallback_threshold: float = 0.8,
 ) -> TemplateConfig:
     meta = metadata or {}
     p = str(preset).lower()
+    threshold = float(meta.get("equation_image_fallback_threshold", equation_image_fallback_threshold))
 
     if p == "research_paper":
         return TemplateConfig(
@@ -134,6 +164,7 @@ def get_template_config(
             header_right=False,
             show_footer=True,
             footer_format="page_right",
+            equation_image_fallback_threshold=threshold,
         )
     elif p == "standard":
         return TemplateConfig(
@@ -170,6 +201,7 @@ def get_template_config(
             header_right=False,
             show_footer=True,
             footer_format="page_of_total",
+            equation_image_fallback_threshold=threshold,
         )
     elif p == "preserve_layout":
         pw = float(meta.get("page_width", 8.5)) if meta.get("page_width") else 8.5
@@ -178,29 +210,33 @@ def get_template_config(
             preset="preserve_layout",
             page_width_in=pw if 4.0 <= pw <= 17.0 else 8.5,
             page_height_in=ph if 4.0 <= ph <= 22.0 else 11.0,
-            top_margin_in=0.8,
-            bottom_margin_in=0.8,
-            left_margin_in=0.8,
-            right_margin_in=0.8,
+            top_margin_in=0.55,
+            bottom_margin_in=0.55,
+            left_margin_in=0.55,
+            right_margin_in=0.55,
             body_font="Arial",
             heading_font="Arial",
-            body_size_pt=10.5,
-            body_line_spacing=1.05,
-            body_space_after_pt=3.0,
+            # Screenshot and book-page sources commonly use substantially
+            # smaller type than the academic template.  Preserve mode keeps
+            # their visual density and avoids moving a source page's final
+            # worked line onto a new Word page.
+            body_size_pt=8.5,
+            body_line_spacing=1.0,
+            body_space_after_pt=1.0,
             body_space_before_pt=0.0,
-            heading1_size_pt=15.0,
-            heading1_before_pt=8.0,
-            heading1_after_pt=3.0,
+            heading1_size_pt=11.5,
+            heading1_before_pt=4.0,
+            heading1_after_pt=1.0,
             heading1_color=RGBColor(0, 0, 0),
-            heading2_size_pt=12.5,
-            heading2_before_pt=6.0,
-            heading2_after_pt=2.0,
+            heading2_size_pt=10.0,
+            heading2_before_pt=3.0,
+            heading2_after_pt=1.0,
             heading2_color=RGBColor(0, 0, 0),
-            heading3_size_pt=11.0,
-            heading3_before_pt=4.0,
-            heading3_after_pt=2.0,
+            heading3_size_pt=9.0,
+            heading3_before_pt=2.0,
+            heading3_after_pt=1.0,
             heading3_color=RGBColor(0, 0, 0),
-            title_size_pt=18.0,
+            title_size_pt=14.0,
             title_color=RGBColor(0, 0, 0),
             table_border_color="9CA3AF",
             table_header_bg="E5E7EB",
@@ -208,6 +244,7 @@ def get_template_config(
             header_right=False,
             show_footer=True,
             footer_format="page_right",
+            equation_image_fallback_threshold=threshold,
         )
     else:  # academic_textbook (default)
         return TemplateConfig(
@@ -244,6 +281,7 @@ def get_template_config(
             header_right=True,
             show_footer=True,
             footer_format="em_dash",
+            equation_image_fallback_threshold=threshold,
         )
 
 
@@ -264,9 +302,14 @@ def build_docx_from_document(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     warnings: list[str] = list(document.warnings)
+    stats: dict[str, int] = {"native_omml": 0, "image_fallback": 0, "unresolved": 0}
     doc = docx.Document()
 
-    config = get_template_config(template, document.metadata)
+    config = (
+        template
+        if isinstance(template, TemplateConfig)
+        else get_template_config(template, metadata=document.metadata)
+    )
     _apply_template_styles(doc, config)
     _setup_header_footer(doc, config, document.title)
 
@@ -295,21 +338,63 @@ def build_docx_from_document(
         r.font.color.rgb = config.title_color
         r.bold = True
 
-    for element in document.elements:
+    elem_idx = 0
+    total_elems = len(document.elements)
+    while elem_idx < total_elems:
+        element = document.elements[elem_idx]
+        if (
+            isinstance(element, Table)
+            and elem_idx + 1 < total_elems
+            and isinstance(document.elements[elem_idx + 1], Table)
+            and _should_place_tables_side_by_side(element, document.elements[elem_idx + 1])
+        ):
+            _add_side_by_side_tables(
+                doc,
+                element,
+                document.elements[elem_idx + 1],
+                warnings,
+                pandoc_path,
+                config,
+                asset_store=asset_store,
+                stats=stats,
+            )
+            elem_idx += 2
+            continue
+
         if isinstance(element, Heading):
-            _add_heading(doc, element, warnings, pandoc_path, config)
+            _add_heading(
+                doc, element, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+            )
         elif isinstance(element, DisplayEquation):
-            _add_display_equation(doc, element, warnings, pandoc_path, config)
+            _add_display_equation(
+                doc, element, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+            )
         elif isinstance(element, Paragraph):
-            _add_paragraph(doc, element, warnings, pandoc_path, config)
+            _add_paragraph(
+                doc, element, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+            )
         elif isinstance(element, Table):
-            _add_table(doc, element, warnings, pandoc_path, config)
+            _add_table(
+                doc, element, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+            )
         elif isinstance(element, ListBlock):
-            _add_list_block(doc, element, warnings, pandoc_path, config)
+            _add_list_block(
+                doc, element, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+            )
         elif isinstance(element, PageBreak):
             doc.add_page_break()
         elif isinstance(element, ImageBlock):
             _add_image_block(doc, element, warnings, config, asset_store=asset_store)
+        elem_idx += 1
+
+    document.metadata["export_stats"] = dict(stats)
+    if stats["image_fallback"] > 0 or stats["unresolved"] > 0:
+        summary = (
+            f"Export summary: {stats['native_omml']} native OMML equations, "
+            f"{stats['image_fallback']} image fallback equations, "
+            f"{stats['unresolved']} unresolved equations"
+        )
+        warnings.append(summary)
 
     # Save to disk
     doc.save(str(output))
@@ -429,26 +514,68 @@ def _clean_error_message(err: str | None) -> str:
     return "syntax error"
 
 
+def _source_rgb(value: str | None) -> RGBColor | None:
+    """Parse a source-derived six-digit RGB value defensively."""
+
+    if not value or not re.fullmatch(r"[0-9A-Fa-f]{6}", value):
+        return None
+    return RGBColor(int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+
+
+def _apply_shading(paragraph: docx.text.paragraph.Paragraph, color: str | None) -> None:
+    if not color or not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        return
+    p_pr = paragraph._p.get_or_add_pPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:fill"), color.upper())
+    p_pr.append(shd)
+
+
+def _apply_run_background(run: Any, color: str | None) -> None:
+    if not color or not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        return
+    r_pr = run._r.get_or_add_rPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:fill"), color.upper())
+    r_pr.append(shd)
+
+
 def _add_heading(
     doc: docx.Document,
     heading: Heading,
     warnings: list[str],
     pandoc_path: str | None,
     config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
     lvl = max(1, min(6, heading.level))
     h = doc.add_heading(level=lvl)
     hp = h.paragraph_format
     hp.keep_with_next = True
 
-    if heading.alignment == "center" or (lvl == 1 and config.preset in ("academic_textbook", "research_paper")):
+    is_exercises_header = heading.text.strip().lower() in (
+        "exercises",
+        "exercises.",
+        "exercise",
+        "problems",
+        "problems.",
+    )
+    if heading.alignment == "center" or is_exercises_header or (
+        lvl == 1 and config.preset in ("academic_textbook", "research_paper")
+    ):
         hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
     elif heading.alignment == "right":
         hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     else:
         hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    if lvl == 1:
+    if is_exercises_header:
+        hp.space_before = Pt(8.0)
+        hp.space_after = Pt(4.0)
+        target_size = config.heading2_size_pt
+        target_color = RGBColor(0, 0, 0)
+    elif lvl == 1:
         hp.space_before = Pt(config.heading1_before_pt)
         hp.space_after = Pt(config.heading1_after_pt)
         target_size = config.heading1_size_pt
@@ -469,12 +596,15 @@ def _add_heading(
             r = h.add_run(run.text)
             r.font.name = config.heading_font
             r.font.size = Pt(target_size)
-            r.font.color.rgb = target_color
+            r.font.color.rgb = _source_rgb(run.color) or target_color
             r.bold = True
-            r.italic = run.italic
+            r.italic = True if is_exercises_header else run.italic
             r.underline = run.underline
+            _apply_run_background(r, run.background_color)
         elif isinstance(run, InlineEquation):
-            _append_inline_equation(h, run, warnings, pandoc_path)
+            _append_inline_equation(
+                h, run, warnings, pandoc_path, config=config, asset_store=asset_store, stats=stats
+            )
 
 
 def _add_paragraph(
@@ -483,6 +613,8 @@ def _add_paragraph(
     warnings: list[str],
     pandoc_path: str | None,
     config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
     p = doc.add_paragraph()
     if paragraph.alignment == "center":
@@ -500,19 +632,37 @@ def _add_paragraph(
 
     pf = p.paragraph_format
     pf.line_spacing = config.body_line_spacing
-    pf.space_after = Pt(config.body_space_after_pt)
-    pf.space_before = Pt(config.body_space_before_pt)
+    if paragraph.style == "exercises_heading":
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pf.space_before = Pt(8.0)
+        pf.space_after = Pt(4.0)
+        pf.keep_with_next = True
+    elif paragraph.style == "theorem":
+        pf.space_before = Pt(4.0)
+        pf.space_after = Pt(4.0)
+        pf.keep_with_next = True
+    elif paragraph.style == "exercise":
+        pf.space_before = Pt(2.0)
+        pf.space_after = Pt(2.0)
+    else:
+        pf.space_after = Pt(config.body_space_after_pt)
+        pf.space_before = Pt(config.body_space_before_pt)
+    _apply_shading(p, paragraph.shading)
 
     for run in paragraph.runs:
         if isinstance(run, TextRun):
             r = p.add_run(run.text)
             r.font.name = config.body_font
             r.font.size = Pt(run.font_size or config.body_size_pt)
+            r.font.color.rgb = _source_rgb(run.color) or RGBColor(30, 30, 30)
             r.bold = run.bold
             r.italic = run.italic
             r.underline = run.underline
+            _apply_run_background(r, run.background_color)
         elif isinstance(run, InlineEquation):
-            _append_inline_equation(p, run, warnings, pandoc_path)
+            _append_inline_equation(
+                p, run, warnings, pandoc_path, config=config, asset_store=asset_store, stats=stats
+            )
 
 
 def _add_display_equation(
@@ -521,26 +671,60 @@ def _add_display_equation(
     warnings: list[str],
     pandoc_path: str | None,
     config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
-    p = doc.add_paragraph()
+    number_paragraph: docx.text.paragraph.Paragraph | None = None
+    if equation.numbering:
+        # A borderless three-cell table keeps the formula centred in the usable
+        # line while anchoring its source label at the right edge.  Unlike
+        # spaces or a text box, both objects remain editable in Word.
+        table = doc.add_table(rows=1, cols=3)
+        table.autofit = False
+        table._tbl.tblPr.append(
+            parse_xml(
+                r'<w:tblBorders %s><w:top w:val="nil"/><w:left w:val="nil"/>'
+                r'<w:bottom w:val="nil"/><w:right w:val="nil"/>'
+                r'<w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+                % nsdecls("w")
+            )
+        )
+        usable_width = config.page_width_in - config.left_margin_in - config.right_margin_in
+        widths = (0.15 * usable_width, 0.70 * usable_width, 0.15 * usable_width)
+        for cell, width in zip(table.rows[0].cells, widths):
+            cell.width = Inches(width)
+        p = table.cell(0, 1).paragraphs[0]
+        number_paragraph = table.cell(0, 2).paragraphs[0]
+        number_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    else:
+        p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pf = p.paragraph_format
-    pf.space_before = Pt(6)
-    pf.space_after = Pt(6)
+    equation_spacing = 1 if config.preset == "preserve_layout" else 6
+    pf.space_before = Pt(equation_spacing)
+    pf.space_after = Pt(equation_spacing)
+
+    threshold = getattr(config, "equation_image_fallback_threshold", 0.8)
+    needs_fallback, fallback_reason = should_fallback_to_image(equation, threshold=threshold)
 
     elem: etree._Element | None = None
     err: str | None = None
 
-    if equation.omml:
-        try:
-            elem = etree.fromstring(equation.omml.encode("utf-8"))
-        except Exception as exc:
-            err = str(exc)
+    if not needs_fallback:
+        if equation.omml:
+            try:
+                elem = etree.fromstring(equation.omml.encode("utf-8"))
+            except Exception as exc:
+                err = str(exc)
 
-    if elem is None:
-        elem, err = latex_to_omml(equation.latex, display=True, pandoc_path=pandoc_path)
+        if elem is None and equation.latex:
+            elem, err = latex_to_omml(equation.latex, display=True, pandoc_path=pandoc_path)
 
-    if elem is not None:
+        if elem is None:
+            needs_fallback = True
+            fallback_reason = f"OMML conversion failed: {_clean_error_message(err)}"
+
+    if elem is not None and not needs_fallback:
         if not elem.tag.endswith("oMathPara"):
             para_wrap = etree.Element(f"{{{OMML_NS}}}oMathPara")
             jc = etree.SubElement(
@@ -551,20 +735,57 @@ def _add_display_equation(
             elem = para_wrap
         p._p.append(elem)
 
-        if equation.numbering:
-            r_num = p.add_run(f"    ({equation.numbering})")
+        if equation.numbering and number_paragraph is not None:
+            r_num = number_paragraph.add_run(f"({equation.numbering})")
             r_num.font.name = config.body_font
             r_num.font.size = Pt(config.body_size_pt * 0.95)
             r_num.font.color.rgb = RGBColor(100, 100, 100)
+        if stats is not None:
+            stats["native_omml"] += 1
     else:
-        equation.error = err
+        store = asset_store or default_asset_store
+        img_stream: io.BytesIO | None = None
+        if equation.asset_id:
+            asset = store.get(equation.asset_id)
+            if asset and asset.data:
+                img_stream = io.BytesIO(asset.data)
+
+        if img_stream is not None:
+            try:
+                max_w_in = max(
+                    1.5, config.page_width_in - (config.left_margin_in + config.right_margin_in)
+                )
+                if equation.box:
+                    box_w = equation.box[2] - equation.box[0]
+                    width_in = min(max_w_in, max(1.5, box_w / 160.0))
+                else:
+                    width_in = min(max_w_in, 4.5)
+                r_img = p.add_run()
+                r_img.add_picture(img_stream, width=Inches(width_in))
+                if equation.numbering and number_paragraph is not None:
+                    r_num = number_paragraph.add_run(f"({equation.numbering})")
+                    r_num.font.name = config.body_font
+                    r_num.font.size = Pt(config.body_size_pt * 0.95)
+                    r_num.font.color.rgb = RGBColor(100, 100, 100)
+                warnings.append(
+                    f"Display equation fallback to source image (asset: {equation.asset_id}, reason: {fallback_reason})"
+                )
+                if stats is not None:
+                    stats["image_fallback"] += 1
+                return
+            except Exception as pic_err:
+                warnings.append(f"Could not embed display fallback image: {pic_err}")
+
+        equation.error = err or fallback_reason
         equation.raw_source = equation.latex
-        clean_err = _clean_error_message(err)
+        clean_err = _clean_error_message(err or fallback_reason)
         msg = f"Display equation could not be converted: {clean_err}"
         warnings.append(f"{msg} (equation: {equation.latex[:40]}...)")
         r = p.add_run(f"[{msg}]")
         r.italic = True
         r.font.color.rgb = RGBColor(128, 128, 128)
+        if stats is not None:
+            stats["unresolved"] += 1
 
 
 def _append_inline_equation(
@@ -572,54 +793,83 @@ def _append_inline_equation(
     equation: InlineEquation,
     warnings: list[str],
     pandoc_path: str | None,
+    config: TemplateConfig | None = None,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
+    threshold = getattr(config, "equation_image_fallback_threshold", 0.8) if config else 0.8
+    needs_fallback, fallback_reason = should_fallback_to_image(equation, threshold=threshold)
+
     elem: etree._Element | None = None
     err: str | None = None
 
-    if equation.omml:
-        try:
-            elem = etree.fromstring(equation.omml.encode("utf-8"))
-        except Exception as exc:
-            err = str(exc)
+    if not needs_fallback:
+        if equation.omml:
+            try:
+                elem = etree.fromstring(equation.omml.encode("utf-8"))
+            except Exception as exc:
+                err = str(exc)
 
-    if elem is None:
-        elem, err = latex_to_omml(equation.latex, display=False, pandoc_path=pandoc_path)
+        if elem is None and equation.latex:
+            elem, err = latex_to_omml(equation.latex, display=False, pandoc_path=pandoc_path)
 
-    if elem is not None:
+        if elem is None:
+            needs_fallback = True
+            fallback_reason = f"OMML conversion failed: {_clean_error_message(err)}"
+
+    if elem is not None and not needs_fallback:
         if elem.tag.endswith("oMathPara"):
             math_child = elem.find(f".//{{{OMML_NS}}}oMath")
             if math_child is not None:
                 elem = math_child
         p._p.append(elem)
+        if stats is not None:
+            stats["native_omml"] += 1
     else:
-        equation.error = err
+        store = asset_store or default_asset_store
+        img_stream: io.BytesIO | None = None
+        if equation.asset_id:
+            asset = store.get(equation.asset_id)
+            if asset and asset.data:
+                img_stream = io.BytesIO(asset.data)
+
+        if img_stream is not None:
+            try:
+                run = p.add_run()
+                font_size = config.body_size_pt if config else 11.0
+                run.add_picture(img_stream, height=Pt(font_size * 1.35))
+                warnings.append(
+                    f"Inline equation fallback to source image (asset: {equation.asset_id}, reason: {fallback_reason})"
+                )
+                if stats is not None:
+                    stats["image_fallback"] += 1
+                return
+            except Exception as pic_err:
+                warnings.append(f"Could not embed fallback image: {pic_err}")
+
+        equation.error = err or fallback_reason
         equation.raw_source = equation.latex
-        clean_err = _clean_error_message(err)
+        clean_err = _clean_error_message(err or fallback_reason)
         msg = f"Inline equation could not be converted: {clean_err}"
         warnings.append(f"{msg} (equation: {equation.latex[:30]}...)")
         r = p.add_run(f"[{msg}]")
         r.italic = True
         r.font.color.rgb = RGBColor(128, 128, 128)
+        if stats is not None:
+            stats["unresolved"] += 1
 
 
-def _add_table(
-    doc: docx.Document,
+def _populate_table_cells(
+    tbl: docx.table.Table,
     table: Table,
     warnings: list[str],
     pandoc_path: str | None,
     config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
-    if not table.rows:
-        return
-
-    num_rows = len(table.rows)
-    num_cols = max(len(row.cells) for row in table.rows)
-    if num_cols == 0:
-        return
-
-    tbl = doc.add_table(rows=num_rows, cols=num_cols)
-    _style_table(tbl, config)
-
+    num_cols = max(len(row.cells) for row in table.rows) if table.rows else 0
+    threshold = getattr(config, "equation_image_fallback_threshold", 0.8)
     for r_idx, row in enumerate(table.rows):
         is_hdr = row.is_header or (r_idx == 0)
         for c_idx, cell in enumerate(row.cells):
@@ -645,27 +895,219 @@ def _add_table(
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     elif el.alignment == "right":
                         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    _apply_shading(p, el.shading)
                     for run in el.runs:
                         if isinstance(run, TextRun):
                             r = p.add_run(run.text)
                             r.font.name = config.body_font
                             r.font.size = Pt(config.body_size_pt * 0.95)
+                            r.font.color.rgb = _source_rgb(run.color) or RGBColor(30, 30, 30)
                             r.bold = run.bold or is_hdr
                             r.italic = run.italic
                             r.underline = run.underline
+                            _apply_run_background(r, run.background_color)
                         elif isinstance(run, InlineEquation):
-                            _append_inline_equation(p, run, warnings, pandoc_path)
+                            _append_inline_equation(
+                                p,
+                                run,
+                                warnings,
+                                pandoc_path,
+                                config=config,
+                                asset_store=asset_store,
+                                stats=stats,
+                            )
                 elif isinstance(el, DisplayEquation):
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    elem, err = latex_to_omml(el.latex, display=True, pandoc_path=pandoc_path)
-                    if elem is not None:
+                    needs_fallback, fallback_reason = should_fallback_to_image(
+                        el, threshold=threshold
+                    )
+                    elem: etree._Element | None = None
+                    err: str | None = None
+                    if not needs_fallback:
+                        if el.omml:
+                            try:
+                                elem = etree.fromstring(el.omml.encode("utf-8"))
+                            except Exception as exc:
+                                err = str(exc)
+                        if elem is None and el.latex:
+                            elem, err = latex_to_omml(el.latex, display=True, pandoc_path=pandoc_path)
+                        if elem is None:
+                            needs_fallback = True
+                            fallback_reason = f"OMML conversion failed: {_clean_error_message(err)}"
+                    if elem is not None and not needs_fallback:
                         p._p.append(elem)
+                        if stats is not None:
+                            stats["native_omml"] += 1
                     else:
-                        el.error = err
-                        clean_err = _clean_error_message(err)
+                        store = asset_store or default_asset_store
+                        img_stream = None
+                        if el.asset_id:
+                            asset = store.get(el.asset_id)
+                            if asset and asset.data:
+                                img_stream = io.BytesIO(asset.data)
+                        if img_stream is not None:
+                            try:
+                                r_img = p.add_run()
+                                r_img.add_picture(img_stream, width=Inches(2.0))
+                                warnings.append(
+                                    f"Table equation fallback to source image (asset: {el.asset_id}, reason: {fallback_reason})"
+                                )
+                                if stats is not None:
+                                    stats["image_fallback"] += 1
+                                continue
+                            except Exception:
+                                pass
+                        el.error = err or fallback_reason
+                        clean_err = _clean_error_message(err or fallback_reason)
                         warnings.append(f"Table equation conversion failed: {clean_err}")
                         r = p.add_run(f"[Equation conversion failed: {clean_err}]")
                         r.italic = True
+                        if stats is not None:
+                            stats["unresolved"] += 1
+
+
+def _should_place_tables_side_by_side(t1: Table, t2: Table) -> bool:
+    """Check if two consecutive tables should be placed side-by-side."""
+    if not t1.rows or not t2.rows:
+        return False
+    cols1 = max(len(r.cells) for r in t1.rows)
+    cols2 = max(len(r.cells) for r in t2.rows)
+    if cols1 > 5 or cols2 > 5 or len(t1.rows) > 6 or len(t2.rows) > 6:
+        return False
+    if t1.box and t2.box:
+        same_box = (t1.box == t2.box)
+        vert_overlap = not (t1.box[3] < t2.box[1] or t2.box[3] < t1.box[1])
+        return same_box or vert_overlap
+    return True
+
+
+def _remove_table_borders(tbl: docx.table.Table) -> None:
+    tblPr = tbl._tbl.tblPr
+    borders = parse_xml(
+        r'<w:tblBorders %s>'
+        r'<w:top w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'<w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'<w:bottom w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'<w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'<w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'<w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        r'</w:tblBorders>' % nsdecls("w")
+    )
+    tblPr.append(borders)
+
+
+def _add_side_by_side_tables(
+    doc: docx.Document,
+    table1: Table,
+    table2: Table,
+    warnings: list[str],
+    pandoc_path: str | None,
+    config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
+) -> None:
+    """Render two compact tables side-by-side inside a borderless layout container."""
+    container = doc.add_table(rows=1, cols=3)
+    _remove_table_borders(container)
+    jc = parse_xml(r'<w:jc %s w:val="center"/>' % nsdecls("w"))
+    container._tbl.tblPr.append(jc)
+
+    container.columns[0].width = Inches(2.7)
+    container.columns[1].width = Inches(0.5)
+    container.columns[2].width = Inches(2.7)
+
+    # Table 1
+    c1 = container.cell(0, 0)
+    store = asset_store or default_asset_store
+    asset1 = store.get(table1.asset_id) if getattr(table1, "fallback_image", False) and getattr(table1, "asset_id", None) else None
+    if asset1 and asset1.data:
+        img_s1 = io.BytesIO(asset1.data)
+        c1.paragraphs[0].add_run().add_picture(img_s1, width=Inches(2.7))
+        warnings.append("Table structure could not be reliably recovered; embedded original table crop as fallback image.")
+        if stats is not None:
+            stats["image_fallback"] += 1
+    elif table1.rows:
+        p_before1 = c1.paragraphs[0]._p
+        t1 = c1.add_table(rows=len(table1.rows), cols=max(len(r.cells) for r in table1.rows))
+        c1._tc.remove(p_before1)
+        if c1.paragraphs:
+            c1.paragraphs[-1].paragraph_format.space_before = Pt(0)
+            c1.paragraphs[-1].paragraph_format.space_after = Pt(0)
+        _style_table(t1, config)
+        _populate_table_cells(
+            t1, table1, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+        )
+
+    # Spacer
+    c_spacer = container.cell(0, 1)
+    c_spacer.paragraphs[0].text = ""
+
+    # Table 2
+    c2 = container.cell(0, 2)
+    asset2 = store.get(table2.asset_id) if getattr(table2, "fallback_image", False) and getattr(table2, "asset_id", None) else None
+    if asset2 and asset2.data:
+        img_s2 = io.BytesIO(asset2.data)
+        c2.paragraphs[0].add_run().add_picture(img_s2, width=Inches(2.7))
+        warnings.append("Table structure could not be reliably recovered; embedded original table crop as fallback image.")
+        if stats is not None:
+            stats["image_fallback"] += 1
+    elif table2.rows:
+        p_before2 = c2.paragraphs[0]._p
+        t2 = c2.add_table(rows=len(table2.rows), cols=max(len(r.cells) for r in table2.rows))
+        c2._tc.remove(p_before2)
+        if c2.paragraphs:
+            c2.paragraphs[-1].paragraph_format.space_before = Pt(0)
+            c2.paragraphs[-1].paragraph_format.space_after = Pt(0)
+        _style_table(t2, config)
+        _populate_table_cells(
+            t2, table2, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+        )
+
+
+def _add_table(
+    doc: docx.Document,
+    table: Table,
+    warnings: list[str],
+    pandoc_path: str | None,
+    config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
+) -> None:
+    if getattr(table, "fallback_image", False) and getattr(table, "asset_id", None):
+        store = asset_store or default_asset_store
+        asset = store.get(table.asset_id)
+        if asset and asset.data:
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(8)
+            p.paragraph_format.space_after = Pt(4)
+            img_stream = io.BytesIO(asset.data)
+            max_w_in = max(1.5, config.page_width_in - (config.left_margin_in + config.right_margin_in))
+            if table.box:
+                box_w = table.box[2] - table.box[0]
+                frac = min(1.0, max(0.25, box_w / 1400.0))
+                w = Inches(min(max_w_in, max(2.0, max_w_in * frac)))
+            else:
+                w = Inches(min(max_w_in, 5.0))
+            p.add_run().add_picture(img_stream, width=w)
+            warnings.append("Table structure could not be reliably recovered; embedded original table crop as fallback image.")
+            if stats is not None:
+                stats["image_fallback"] += 1
+            return
+
+    if not table.rows:
+        return
+
+    num_rows = len(table.rows)
+    num_cols = max(len(row.cells) for row in table.rows)
+    if num_cols == 0:
+        return
+
+    tbl = doc.add_table(rows=num_rows, cols=num_cols)
+    _style_table(tbl, config)
+    _populate_table_cells(
+        tbl, table, warnings, pandoc_path, config, asset_store=asset_store, stats=stats
+    )
 
 
 def _style_table(tbl: docx.table.Table, config: TemplateConfig) -> None:
@@ -733,6 +1175,8 @@ def _add_list_block(
     warnings: list[str],
     pandoc_path: str | None,
     config: TemplateConfig,
+    asset_store: Any | None = None,
+    stats: dict[str, int] | None = None,
 ) -> None:
     style_name = "List Number" if list_block.ordered else "List Bullet"
     for item in list_block.items:
@@ -751,7 +1195,15 @@ def _add_list_block(
                         r.italic = run.italic
                         r.underline = run.underline
                     elif isinstance(run, InlineEquation):
-                        _append_inline_equation(p, run, warnings, pandoc_path)
+                        _append_inline_equation(
+                            p,
+                            run,
+                            warnings,
+                            pandoc_path,
+                            config=config,
+                            asset_store=asset_store,
+                            stats=stats,
+                        )
 
 
 def _add_image_block(

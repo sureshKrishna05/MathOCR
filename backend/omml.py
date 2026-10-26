@@ -85,6 +85,37 @@ def sanitize_latex_for_pandoc(latex: str) -> str:
     cleaned = re.sub(r"\\(?:tag|label)\{[^}]*\}", "", cleaned)
     cleaned = re.sub(r"\\nonumber\b", "", cleaned)
 
+    # 8. TeX primitives: \cr -> \\
+    cleaned = re.sub(r"\\cr\b", r"\\\\", cleaned)
+
+    # 9. Non-standard equation systems and alignments -> standard AMS-LaTeX
+    cleaned = re.sub(r"\\begin\{system\*?\}", r"\\begin{cases}", cleaned)
+    cleaned = re.sub(r"\\end\{system\*?\}", r"\\end{cases}", cleaned)
+    cleaned = re.sub(r"\\cases\{([\s\S]*?)\}", r"\\begin{cases} \1 \\end{cases}", cleaned)
+    cleaned = re.sub(r"\\eqalign\{([\s\S]*?)\}", r"\\begin{aligned} \1 \\end{aligned}", cleaned)
+    cleaned = re.sub(r"\\displaylines\{([\s\S]*?)\}", r"\\begin{gathered} \1 \\end{gathered}", cleaned)
+    cleaned = re.sub(r"\\matrix\{([\s\S]*?)\}", r"\\begin{matrix} \1 \\end{matrix}", cleaned)
+    cleaned = re.sub(r"\\pmatrix\{([\s\S]*?)\}", r"\\begin{pmatrix} \1 \\end{pmatrix}", cleaned)
+
+    # 10. \systeme{...} comma-separated systems
+    m_sys = re.match(r"^\\systeme\{([\s\S]+)\}$", cleaned)
+    if m_sys:
+        parts = [p.strip() for p in m_sys.group(1).split(",") if p.strip()]
+        cleaned = r"\begin{cases} " + r" \\ ".join(parts) + r" \end{cases}"
+
+    # 11. Normalize horizontal and vertical phantoms to standard \phantom
+    cleaned = re.sub(r"\\(?:hphantom|vphantom)\b", r"\\phantom", cleaned)
+
+    # 12. Unwrap smash, lap, and centering macros unsupported by texmath
+    cleaned = re.sub(r"\\(?:mathclap|mathllap|mathrlap)\{([\s\S]*?)\}", r"{\1}", cleaned)
+    cleaned = re.sub(r"\\smash\s*(?:\[[^\]]*\])?\s*\{([\s\S]*?)\}", r"{\1}", cleaned)
+
+    # 13. Convert \intertext{...} to standard \text{...}
+    cleaned = re.sub(r"\\intertext\{([\s\S]*?)\}", r"\\text{\1}", cleaned)
+
+    # 14. Strip TeX layout primitives that texmath does not understand
+    cleaned = re.sub(r"\\(?:openup\s*[\d.]+\w*|relax|null|mathstrut|jot)\b", "", cleaned)
+
     return cleaned.strip()
 
 

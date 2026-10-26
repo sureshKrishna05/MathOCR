@@ -107,6 +107,7 @@ const translations = {
     buildingWord: "Building Word…",
     wordFailed: "Word export failed",
     wordCreated: "Editable Word document created",
+    fallbackImage: "Image Fallback",
     docStyle: "Document Style",
     styleAcademic: "Academic Textbook",
     styleResearch: "Research Paper",
@@ -250,6 +251,7 @@ const translations = {
     buildingWord: "Δημιουργία Word…",
     wordFailed: "Η εξαγωγή Word απέτυχε",
     wordCreated: "Το επεξεργάσιμο έγγραφο Word δημιουργήθηκε",
+    fallbackImage: "Εφεδρική εικόνα",
     docStyle: "Στυλ εγγράφου",
     styleAcademic: "Ακαδημαϊκό σύγγραμμα",
     styleResearch: "Επιστημονικό άρθρο",
@@ -715,6 +717,12 @@ function renderResults(shouldScroll = true) {
     badges.append(engineBadge);
     const chip = confidenceChip(result.confidence);
     if (chip) badges.append(chip);
+    if (result.fallback_image || (result.confidence != null && result.confidence < 0.8)) {
+      const fallbackBadge = document.createElement("span");
+      fallbackBadge.className = "confidence-chip low";
+      fallbackBadge.textContent = t("fallbackImage") || "Image Fallback";
+      badges.append(fallbackBadge);
+    }
 
     const preview = card.querySelector(".result-preview");
     const textarea = card.querySelector("textarea");
@@ -828,7 +836,7 @@ function renderMarkdownPreview(markdown, target) {
     }
 
     // Display math
-    const displayMatch = trimmed.match(/^\$\$([\s\S]+?)\$\$$/);
+    const displayMatch = trimmed.match(/^\$\$([\s\S]+?)\$\$(?:\s*\{#eq:(\d{1,3})\})?$/);
     if (displayMatch && window.katex) {
       const wrapper = document.createElement("div");
       wrapper.className = "doc-math";
@@ -836,6 +844,13 @@ function renderMarkdownPreview(markdown, target) {
         window.katex.render(displayMatch[1].trim(), wrapper, { displayMode: true, throwOnError: false, strict: "ignore" });
       } catch (_error) {
         wrapper.textContent = trimmed;
+      }
+      if (displayMatch[2]) {
+        const number = document.createElement("span");
+        number.className = "doc-equation-number";
+        number.textContent = `(${displayMatch[2]})`;
+        number.style.float = "right";
+        wrapper.append(number);
       }
       target.append(wrapper);
       continue;
@@ -1031,7 +1046,10 @@ async function triggerDocxDownload(body, defaultFilename) {
     } catch (_) {}
   }
 
-  if (warnings && warnings.length > 0) {
+  const exportSummary = warnings.find((w) => typeof w === "string" && w.startsWith("Export summary:"));
+  if (exportSummary) {
+    showToast(`${t("wordCreated")} (${exportSummary.replace("Export summary: ", "")})`);
+  } else if (warnings && warnings.length > 0) {
     showToast(`${t("wordCreated")} (${warnings.length} warning(s))`);
   } else {
     showToast(t("wordCreated"));
@@ -1048,6 +1066,7 @@ async function downloadDocumentWord() {
   try {
     const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
     let combinedDocument = null;
+    let sourceTitle = "";
     if (state.documents && state.documents.length > 0) {
       const allElements = [];
       const allMetadata = {};
@@ -1055,18 +1074,29 @@ async function downloadDocumentWord() {
         if (d.document && Array.isArray(d.document.elements)) {
           allElements.push(...d.document.elements);
           if (d.document.metadata) Object.assign(allMetadata, d.document.metadata);
+          if (!sourceTitle && typeof d.document.title === "string" && d.document.title.trim()) {
+            sourceTitle = d.document.title.trim();
+          }
         }
       });
       if (allElements.length > 0) {
         combinedDocument = {
-          title: t("documentTitle"),
+          // An absent source title must remain absent; inventing a product
+          // title changes the reconstructed document itself.
+          title: sourceTitle,
           elements: allElements,
           metadata: allMetadata,
         };
       }
     }
     await triggerDocxDownload(
-      { title: t("documentTitle"), markdown, document: combinedDocument, template },
+      {
+        title: sourceTitle,
+        markdown,
+        document: combinedDocument,
+        template,
+        equation_image_fallback_threshold: 0.8,
+      },
       `Qryptex Document.docx`
     );
   } catch (error) {
@@ -1096,8 +1126,13 @@ function activeLatex() {
 // show the folder + filename so the user knows it went to Downloads.
 function savedToast(payload) {
   const path = payload && payload.path ? payload.path : "";
-  if (payload && Array.isArray(payload.warnings) && payload.warnings.length > 0) {
-    showToast(path ? `${t("savedTo", { path })} (${payload.warnings.length} equation warning(s))` : t("wordCreated"));
+  const warnings = (payload && Array.isArray(payload.warnings)) ? payload.warnings : [];
+  const exportSummary = warnings.find((w) => typeof w === "string" && w.startsWith("Export summary:"));
+  const summaryText = exportSummary ? exportSummary.replace("Export summary: ", "") : null;
+  if (summaryText) {
+    showToast(path ? `${t("savedTo", { path })} (${summaryText})` : `${t("wordCreated")} (${summaryText})`);
+  } else if (warnings.length > 0) {
+    showToast(path ? `${t("savedTo", { path })} (${warnings.length} equation warning(s))` : t("wordCreated"));
   } else {
     showToast(path ? t("savedTo", { path }) : t("wordCreated"));
   }
@@ -1130,8 +1165,22 @@ async function downloadWord() {
   elements.downloadWordButton.textContent = t("buildingWord");
   try {
     const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
+    const docElements = (state.results || []).map((r) => ({
+      type: "display_equation",
+      latex: r.latex,
+      confidence: r.confidence,
+      asset_id: r.asset_id,
+      fallback_image: Boolean(r.fallback_image),
+      box: r.region,
+    }));
     await triggerDocxDownload(
-      { title: t("texTitle"), equations, template },
+      {
+        title: t("texTitle"),
+        equations,
+        document: { title: t("texTitle"), elements: docElements },
+        template,
+        equation_image_fallback_threshold: 0.8,
+      },
       `MathOCR equations by Bouronikos Christos.docx`
     );
   } catch (error) {

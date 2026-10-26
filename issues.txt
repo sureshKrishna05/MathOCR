@@ -1,0 +1,443 @@
+
+{
+  "project": "MathOCR",
+  "repository": "https://github.com/sureshKrishna05/MathOCR.git",
+  "task": "Complete a controlled, regression-tested reliability improvement of MathOCR's OCR accuracy, mathematical reconstruction, document layout, image preservation and DOCX export.",
+  "mission": "Make MathOCR reliably transform PDFs and scanned images into complete, mathematically correct, editable Word documents. Fix identified defects in the existing implementation rather than creating another parallel OCR pipeline or performing an unnecessary rewrite.",
+  "target_environment": {
+    "development_os": "Fedora Linux",
+    "available_ram": "8 GB",
+    "available_gpu": "NVIDIA RTX 2050 with 4 GB VRAM",
+    "existing_python_environment": ".venv",
+    "existing_backend": "Python and FastAPI",
+    "deployment_requirement": "Preserve existing functionality and Windows packaging compatibility."
+  },
+  "regression_fixtures": [
+    {
+      "name": "Linear Algebra textbook",
+      "source": "linear algebra-10-15.pdf",
+      "generated_output": "MathOCR equations by Bouronikos Christos (4).docx",
+      "purpose": "Validate mathematical systems, text completeness, pagination, operation tables, styles and equation placement."
+    },
+    {
+      "name": "Modern Physics textbook",
+      "source": "Screenshot_20261026_073950(1).png",
+      "generated_output": "Qryptex Document by Bouronikos Christos(1).docx",
+      "purpose": "Validate recognition of prose, numbered equations, subsection headings, worked examples and shaded example blocks."
+    },
+    {
+      "name": "Figure-rich document",
+      "source": "A real PDF or scan containing diagrams, images and numbered captions.",
+      "generated_output": "A newly generated DOCX from the same source.",
+      "purpose": "Validate figure detection, asset preservation, caption association and image placement. Select and register the fixture before running this test."
+    }
+  ],
+  "working_tree_safety": {
+    "priority": "mandatory",
+    "rules": [
+      "Inspect git status, git diff --stat and git diff --check before editing.",
+      "Preserve all existing user changes, including uncommitted changes.",
+      "Do not reset Git, clean the working tree, discard changes, overwrite fixtures or perform a destructive checkout.",
+      "Save a recoverable checkpoint of the current work before modifying it.",
+      "Inspect the current implementation because prior reported fixes may already exist.",
+      "Do not recreate functions, modules or features that already work.",
+      "Make a small, reviewable change for each defect.",
+      "Review the diff after every implementation milestone.",
+      "Do not commit or push until validation is complete and the user authorizes publication."
+    ]
+  },
+  "current_known_defects": {
+    "mathematics": [
+      "Detected equations can be fragmented, merged incorrectly or recognized inaccurately.",
+      "Some equations render as unexplained black bars or other unreadable symbols.",
+      "Stray red question-mark-like mathematical artifacts occur in the Linear Algebra output.",
+      "Unsupported mathematical expressions may be replaced by visible failure placeholders.",
+      "Equation labels and numbers are not always associated with the right expressions.",
+      "Mathematical structures may be valid OMML but mathematically incorrect."
+    ],
+    "text": [
+      "Words, punctuation, variables, subscripts and short tokens are sometimes corrupted.",
+      "Text may be discarded because of confidence filtering or overlap with math regions.",
+      "Paragraphs can be split at incorrect positions.",
+      "Text may disappear during reconstruction, serialization or export.",
+      "Contextual correction needs to avoid changing the scientific meaning of source text."
+    ],
+    "layout": [
+      "Ordinary paragraphs and numbered exercises can receive heading styles incorrectly.",
+      "Theorem statements, section headings, examples and solutions can lose their semantic structure.",
+      "Unnecessary whitespace separates equations from explanatory paragraphs.",
+      "Page breaks can generate unexplained blank pages or awkward overflow.",
+      "Page headers, footers, printed page numbers and page dimensions may be lost or incorrectly inserted into the body.",
+      "Multi-column content may be linearized incorrectly."
+    ],
+    "tables": [
+      "The addition and multiplication operation tables in Linear Algebra Exercise 5 are not preserved in their original side-by-side arrangement.",
+      "Tables can be split across pages or lose row and column relationships.",
+      "Table detection must not rely on document-specific keywords.",
+      "Aligned equations and multi-column prose must not be mistaken for tables."
+    ],
+    "images": [
+      "Figures and diagrams can be omitted.",
+      "Captions may be missing or associated with the wrong figure.",
+      "Image assets may be lost between recognition, document serialization, frontend editing and DOCX export.",
+      "Image dimensions and positioning may not reflect the source.",
+      "The Markdown-only export path must not silently discard structured image metadata."
+    ],
+    "export": [
+      "DOCX output can open successfully while containing missing, inaccurate or misplaced content.",
+      "Native OMML equations alone do not prove mathematical accuracy.",
+      "Real Word tables alone do not prove the table values are correct.",
+      "A successful PDF render alone does not prove fidelity to the source."
+    ],
+    "performance": [
+      "Full test-suite execution previously coincided with a Fedora crash.",
+      "OCR integration tests can consume substantial RAM and VRAM.",
+      "Testing must be arranged to avoid loading multiple large models or processing many high-resolution pages concurrently."
+    ]
+  },
+  "priority_plan": [
+    {
+      "id": "P0-1",
+      "name": "Content preservation",
+      "goal": "Identify every point where source text, mathematical regions, captions, figures or layout metadata is discarded."
+    },
+    {
+      "id": "P0-2",
+      "name": "Mathematical recognition integrity",
+      "goal": "Fix false-positive, fragmented, merged, malformed and incorrectly associated equations."
+    },
+    {
+      "id": "P0-3",
+      "name": "Mathematical rendering",
+      "goal": "Resolve corrupted OMML, unsupported control sequences and unexplained rendered symbols."
+    },
+    {
+      "id": "P0-4",
+      "name": "Reliable document data flow",
+      "goal": "Preserve complete structured content through the API, frontend editor, serialization and DOCX export."
+    },
+    {
+      "id": "P1-1",
+      "name": "Pagination and reading order",
+      "goal": "Eliminate unexplained blank pages and keep logical content in the correct order."
+    },
+    {
+      "id": "P1-2",
+      "name": "Tables and images",
+      "goal": "Preserve correct cell contents, image assets, captions, dimensions and placement."
+    },
+    {
+      "id": "P1-3",
+      "name": "Semantic formatting",
+      "goal": "Use correct Word styles and preserve headings, theorem statements, examples and paragraph hierarchy."
+    },
+    {
+      "id": "P1-4",
+      "name": "Source layout reconstruction",
+      "goal": "Improve alignment, spacing, columns, headers, footers, page dimensions and figure placement."
+    },
+    {
+      "id": "P2-1",
+      "name": "Text correction",
+      "goal": "Reduce OCR spelling errors and improve uncertain-token handling without rewriting source content."
+    },
+    {
+      "id": "P2-2",
+      "name": "Final optimization",
+      "goal": "Improve runtime, memory use, packaging stability and usability after correctness is established."
+    }
+  ],
+  "phase_1_root_cause_audit": {
+    "requirements": [
+      "Trace the complete pipeline from PDF/image loading through preprocessing, layout detection, text OCR, math detection, equation recognition, document assembly, frontend editing and DOCX generation.",
+      "Inspect backend/engines.py, backend/geometry.py, backend/layout.py, backend/document.py, backend/docx_export.py, backend/app.py, backend/pdf_source.py, backend/assets.py, frontend/app.js and relevant tests where they exist.",
+      "Identify which failures occur during detection, recognition, reconciliation, serialization or rendering.",
+      "Capture recognized text, bounding boxes, source crops, confidence scores, selected mathematical candidates and warnings for the registered regression fixtures.",
+      "Identify where equations overlap text regions and whether overlap suppression deletes meaningful prose.",
+      "Inspect where unsupported LaTeX or mathematical macros reach the OMML converter.",
+      "Inspect paragraph styles, page-break markers, section settings, keep-with-next settings and spacing in the generated Word document.",
+      "Inspect image relationships and embedded media rather than assuming images are preserved because ImageBlock exists.",
+      "Use diagnostic outputs from the existing application whenever possible.",
+      "Produce a root-cause matrix before broad implementation changes."
+    ],
+    "required_audit_output": [
+      "Observed defect",
+      "Source page and output page",
+      "Responsible pipeline stage",
+      "Relevant function or file",
+      "Evidence supporting the root cause",
+      "Proposed minimal fix",
+      "Regression test required"
+    ]
+  },
+  "phase_2_mathematics": {
+    "priority": "P0",
+    "requirements": [
+      "Keep math detection, crop preparation, formula recognition, equation-number detection and OMML conversion as distinct stages.",
+      "Inspect the actual source crop for every failing regression expression.",
+      "Fix the origin of stray red symbols rather than deleting all red text.",
+      "Identify why some mathematical crops render as thick black bars or unreadable glyphs.",
+      "Check font and fallback behavior, unsupported OMML nodes, element namespaces, malformed expressions and LibreOffice rendering compatibility.",
+      "Verify fractions, nested fractions, radicals, summations, integrals, limits, matrices, piecewise expressions, Greek symbols, superscripts, subscripts and multiline systems.",
+      "Preserve inline mathematics inside surrounding paragraphs.",
+      "Keep multiple displayed equations separate when the source presents distinct expressions.",
+      "Keep fragments together when they genuinely form a single mathematical expression.",
+      "Preserve equation numbers and labels as explicit structured data associated with their formulas.",
+      "Do not let a math-region overlap suppress an entire paragraph unless the text is genuinely part of the formula.",
+      "Capture low-confidence formula candidates for review rather than silently accepting an arbitrary result.",
+      "Do not substitute a fabricated mathematically plausible expression when OCR fails.",
+      "Preserve an unresolved source crop and a structured warning if the equation cannot be recovered reliably.",
+      "Reuse the existing math-recognition ensemble unless benchmark evidence shows a better alternative."
+    ],
+    "linear_algebra_cases": [
+      "Field axioms and their displayed equations on source pages 1 and 2.",
+      "The general linear system labelled (1-1).",
+      "The homogeneous system and elimination steps on source page 4.",
+      "The linear combination expression and system labelled (1-2).",
+      "The pairs of linear systems in Exercises 2, 3 and 4 on source page 5."
+    ],
+    "modern_physics_cases": [
+      "The subsection heading about the rest mass of a photon.",
+      "The momentum expression labelled (1).",
+      "The relation p = h/lambda labelled (2).",
+      "The subsequent derivation labelled (3).",
+      "The conclusion that the photon's rest mass is zero.",
+      "The equations and numerical calculations within both worked examples."
+    ]
+  },
+  "phase_3_text_integrity": {
+    "priority": "P0",
+    "requirements": [
+      "Retain raw OCR output and original source crops before correction.",
+      "Investigate confidence thresholds that may discard useful words, abbreviations, punctuation or small mathematical tokens.",
+      "Preserve every recoverable source paragraph in the structured document.",
+      "Preserve spaces, punctuation, paragraph boundaries and sentence continuity.",
+      "Do not join unrelated lines or separate a sentence unnecessarily.",
+      "Do not let the math detector remove adjacent text.",
+      "Preserve variables, names, theorem labels, numerical values, units and equation references.",
+      "Use context and language resources to propose probable OCR corrections, not silently rewrite the text.",
+      "Provide uncertainty indicators and source crops for suspicious content.",
+      "Keep correction decisions auditable and allow manual editing.",
+      "Never paraphrase textbook content, add missing claims or change mathematical meaning."
+    ]
+  },
+  "phase_4_structured_data_and_frontend": {
+    "priority": "P0",
+    "requirements": [
+      "Use the structured document representation as the canonical source for complete document content.",
+      "Preserve stable block IDs, page associations, bounding boxes, text runs, math objects, tables, image asset references, captions, styles and page-break metadata.",
+      "Keep Markdown editing where possible without treating Markdown as a lossless representation of all document elements.",
+      "Ensure frontend edits cannot silently erase images, equations, tables, equation labels, captions or styling metadata.",
+      "Repair reconcile_document_with_markdown where needed, preserving non-text blocks while applying user text edits.",
+      "Keep the original structured block metadata available during export.",
+      "Ensure image assets remain valid until DOCX generation and validation finish.",
+      "Validate asset IDs against the active document job and prevent arbitrary filesystem path access.",
+      "Add round-trip tests through the actual API payload and frontend state representation.",
+      "Keep existing API endpoints, templates and user workflows compatible unless a breaking change is justified and documented."
+    ]
+  },
+  "phase_5_pagination_and_layout": {
+    "priority": "P1",
+    "requirements": [
+      "Find and eliminate duplicate or conflicting page-break instructions.",
+      "Do not insert unconditional page breaks that duplicate natural document pagination.",
+      "Preserve explicit source page boundaries in preserve-layout mode where appropriate.",
+      "Allow natural pagination in editable mode without generating unexplained blank pages.",
+      "Keep heading or example labels with their following content when reasonable.",
+      "Avoid oversized headings and excessive paragraph spacing that cause unnecessary extra pages.",
+      "Preserve equation groups near their related explanatory text.",
+      "Preserve original page dimensions, orientation and margins when supported by the selected mode.",
+      "Handle multiple columns in their correct reading order.",
+      "Maintain separate header/footer data where present in the source.",
+      "Do not put running headers or source page numbers into body text accidentally.",
+      "Use styles, tab stops, real table structures and appropriate alignment properties instead of repeated spaces.",
+      "Do not force every document to match the source page count if a flowing editable document is selected.",
+      "Report remaining visual differences where exact source geometry cannot be recreated."
+    ]
+  },
+  "phase_6_tables_and_figures": {
+    "priority": "P1",
+    "tables": [
+      "Preserve table row and column boundaries, values, header rows, merged-cell relationships and tables containing equations.",
+      "Do not use document-specific keywords to decide whether a region is a table.",
+      "Distinguish tables from aligned equation systems and multiple text columns.",
+      "Keep small related tables side by side when the source clearly places them that way.",
+      "Prevent tables from splitting unnecessarily when a compact block can fit on one page.",
+      "Reconstruct the addition and multiplication operation tables in Linear Algebra Exercise 5 as two distinct editable tables with the correct source values.",
+      "Keep the verification sentence following the operation tables."
+    ],
+    "figures": [
+      "For digital PDFs, extract source image objects and coordinates where supported.",
+      "For scans, detect meaningful figure regions and crop at suitable resolution.",
+      "Preserve vector diagrams when practical or render them at sufficient resolution.",
+      "Preserve figure assets in the structured representation and frontend state.",
+      "Associate figure captions using numbering, geometry, proximity and reading order.",
+      "Keep captions as editable Word text.",
+      "Preserve aspect ratio and use source geometry to estimate position and size.",
+      "Do not treat shaded paragraphs or decorative heading bands as figures.",
+      "Do not omit a detected figure silently.",
+      "If extraction or insertion fails, record an explicit warning and retain the source crop when possible.",
+      "Validate that every expected figure is embedded in the final DOCX and that its asset relationship resolves."
+    ]
+  },
+  "phase_7_semantic_formatting": {
+    "priority": "P1",
+    "requirements": [
+      "Use distinct Word styles for ordinary body text, section headings, theorem statements, examples, solutions, exercise items, captions and displayed equations where appropriate.",
+      "Do not apply Heading2 to all body paragraphs.",
+      "Do not classify every short uppercase line as a heading.",
+      "Do not classify every numbered exercise as a section heading.",
+      "Detect hierarchy using numbering, position, whitespace, font evidence, alignment and neighboring regions.",
+      "Preserve bold, italic, subscript, superscript and other emphasis when detected reliably.",
+      "Represent pink example bands through editable Word paragraph shading rather than rasterized content.",
+      "Preserve subsection numbering and heading text.",
+      "Keep 'Theorem 1.' and its associated statement together.",
+      "Format the Exercises heading separately from the numbered exercises.",
+      "Keep 'Sol.' and the worked calculations associated with their example.",
+      "Keep equation numbers in a stable alignment position.",
+      "Separate source-derived styling from template defaults.",
+      "Avoid imposing unrelated blue heading colors on ordinary text.",
+      "Do not invent a document title when source metadata is unavailable."
+    ]
+  },
+  "phase_8_docx_validation": {
+    "priority": "P0",
+    "requirements": [
+      "Validate DOCX ZIP package integrity.",
+      "Verify that each referenced image is present in package media storage and all relationships resolve.",
+      "Verify that all expected text blocks, captions, equations and tables are represented in the document.",
+      "Check the presence and structure of OMML objects, but also manually compare their mathematical content with source crops.",
+      "Verify that operation tables have the correct row and column values.",
+      "Verify that unsupported-equation placeholders do not silently replace content in the final export.",
+      "Verify that exported Word styles match block semantics.",
+      "Ensure temporary assets remain available until export validation completes.",
+      "Check rendered output with LibreOffice and inspect all representative pages.",
+      "Do not declare success based only on XML validity or a successful LibreOffice exit code."
+    ]
+  },
+  "phase_9_resource_safe_testing": {
+    "priority": "mandatory",
+    "reason": "A previous full test run coincided with a Fedora crash. Resource safety must be treated as part of test reliability.",
+    "requirements": [
+      "Inspect memory availability and swap before running expensive OCR tests.",
+      "Run lightweight geometry, serialization, formatting and DOCX-structure tests first.",
+      "Use mocked OCR/layout outputs for unit tests that do not need actual model inference.",
+      "Avoid loading multiple copies of the same model.",
+      "Avoid processing every page of a large PDF at full resolution simultaneously.",
+      "Use bounded batches and release page images, crops and temporary files as soon as possible.",
+      "Run expensive OCR integration tests sequentially, not concurrently.",
+      "Monitor peak RSS and GPU memory for representative integration tests.",
+      "Use process limits or a separate environment where practical to protect the desktop session.",
+      "Do not silently skip failed tests merely to produce a green report.",
+      "If memory rises dangerously, stop the expensive test, record the result and optimize the test or pipeline before retrying.",
+      "Run the full test suite in controlled batches after focused tests pass.",
+      "Report test counts, durations, warnings, failures and memory observations honestly."
+    ],
+    "test_order": [
+      "Unit tests for geometry and math-region grouping",
+      "Unit tests for text and semantic block assembly",
+      "Structured-document serialization and reconciliation tests",
+      "DOCX XML, table, image and OMML tests",
+      "One actual OCR-to-DOCX integration test using Linear Algebra",
+      "One actual OCR-to-DOCX integration test using Modern Physics",
+      "One actual figure-rich PDF-to-DOCX integration test",
+      "Full regression suite in controlled batches"
+    ]
+  },
+  "phase_10_benchmark_and_release_gates": {
+    "priority": "mandatory",
+    "measurements": [
+      "Word error rate and character error rate on manually transcribed sample regions.",
+      "Mathematical expression correctness on manually reviewed equations.",
+      "False-positive mathematical detections.",
+      "Missing or duplicated text blocks.",
+      "Equation-label association accuracy.",
+      "Figure detection recall and final DOCX preservation rate.",
+      "Caption association correctness.",
+      "Table structure correctness.",
+      "Heading and paragraph classification correctness.",
+      "Reading-order accuracy.",
+      "Unexplained blank page count.",
+      "Rendered page count and visual comparison.",
+      "Processing time per page.",
+      "Peak RAM and VRAM usage."
+    ],
+    "rules": [
+      "Save baseline results before the implementation changes.",
+      "Use identical source fixtures and evaluation settings for before-and-after comparisons.",
+      "Set achievable acceptance thresholds after measuring the baseline and review set.",
+      "Do not claim perfect accuracy.",
+      "Do not claim improvement without data.",
+      "Report regressions, unresolved expressions and missing content explicitly.",
+      "Use separate metrics for text, math, tables, figures and formatting rather than a single unsupported accuracy percentage."
+    ],
+    "release_gate": [
+      "All P0 defects identified in the regression fixtures are resolved or documented as blocked by source ambiguity.",
+      "No known missing content or malformed math is silently accepted as correct.",
+      "The DOCX contains correct native equations and editable tables.",
+      "No unexpected blank pages remain.",
+      "The three input categories—Linear Algebra, Modern Physics and a figure-rich document—have been tested end to end.",
+      "The generated DOCX and rendered PDF have been visually inspected.",
+      "The focused and full test suites have passed in resource-controlled runs or any failure has been explicitly resolved.",
+      "Existing functionality and packaging compatibility have been rechecked.",
+      "A final report includes actual test results and remaining limitations."
+    ]
+  },
+  "implementation_milestones": [
+    {
+      "milestone": 1,
+      "name": "Audit and protect the working tree",
+      "stop_condition": "Root-cause report and baseline measurements are complete."
+    },
+    {
+      "milestone": 2,
+      "name": "Fix mathematical content integrity",
+      "stop_condition": "Focused math tests and one real math-heavy conversion pass."
+    },
+    {
+      "milestone": 3,
+      "name": "Fix text and structured-data loss",
+      "stop_condition": "Source text and non-text elements survive frontend and backend reconciliation."
+    },
+    {
+      "milestone": 4,
+      "name": "Fix pagination, styles and tables",
+      "stop_condition": "Rendered Linear Algebra pages show correct block hierarchy, tables and flow."
+    },
+    {
+      "milestone": 5,
+      "name": "Validate image preservation",
+      "stop_condition": "A real figure-rich PDF produces a DOCX with figures and captions intact."
+    },
+    {
+      "milestone": 6,
+      "name": "Run benchmarks and regression tests",
+      "stop_condition": "Before-and-after metrics, test results, resource usage and remaining issues are documented."
+    }
+  ],
+  "execution_policy": {
+    "one_milestone_at_a_time": true,
+    "stop_and_report_after_each_milestone": true,
+    "do_not_continue_after_unresolved_p0_failure": true,
+    "do_not_run_full_suite_before_focused_tests_pass": true,
+    "do_not_run_large_ocr_tests_concurrently": true,
+    "do_not_make_unrelated_changes": true,
+    "do_not_hide_warnings": true,
+    "do_not_discard_uncertain_source_content": true,
+    "do_not_replace_models_without_benchmark_evidence": true,
+    "do_not_claim_success_without_rendered_output_inspection": true,
+    "do_not_commit_or_push_without_user_authorization": true
+  },
+  "final_deliverables": [
+    "Root-cause matrix of all identified issues",
+    "Modified file list with reasons for each change",
+    "Baseline and updated benchmark report",
+    "Resource-safe test execution report",
+    "New regression tests",
+    "Regenerated DOCX for each registered fixture",
+    "Rendered PDF and representative page images",
+    "Confirmation of equation, table, figure and caption preservation",
+    "Known limitations and remaining blockers",
+    "Final release-readiness assessment"
+  ]
+}

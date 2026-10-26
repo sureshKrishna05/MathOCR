@@ -42,7 +42,7 @@ from starlette.concurrency import run_in_threadpool
 from backend import model_store
 from backend.assets import default_asset_store
 from backend.document import DisplayEquation, Document, reconcile_document_with_markdown
-from backend.docx_export import build_docx_from_document
+from backend.docx_export import build_docx_from_document, get_template_config
 from backend.pdf_source import PageSource, extract_pdf_pages
 
 # Engine caches must be redirected below the MathOCR model folder before any
@@ -180,6 +180,8 @@ class EquationResult(BaseModel):
     kind: Literal["isolated", "embedded", "full"] = "isolated"
     region: tuple[int, int, int, int] | None = None
     alternatives: list[AlternativeReading] = Field(default_factory=list)
+    asset_id: str | None = None
+    fallback_image: bool = False
 
 
 class DocumentResult(BaseModel):
@@ -217,6 +219,7 @@ class DocxRequest(BaseModel):
     # When true the file is written straight into the user's Downloads folder
     # (desktop app) instead of streamed back for the browser to save.
     save_to_downloads: bool = False
+    equation_image_fallback_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
 
     @field_validator("equations")
     @classmethod
@@ -438,6 +441,8 @@ def recognize_file(
                             AlternativeReading(engine=alternative.engine, latex=alternative.latex)
                             for alternative in region.alternatives
                         ],
+                        asset_id=getattr(region, "asset_id", None),
+                        fallback_image=getattr(region, "fallback_image", False),
                     )
                 )
             if outcome.markdown:
@@ -985,12 +990,17 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
         doc = Document(title=request.title, elements=elements)
 
     try:
+        config = get_template_config(
+            request.template,
+            metadata=doc.metadata,
+            equation_image_fallback_threshold=request.equation_image_fallback_threshold,
+        )
         export_warnings = await run_in_threadpool(
             build_docx_from_document,
             doc,
             output_path,
             pandoc,
-            request.template,
+            config,
             default_asset_store,
         )
     except Exception as exc:

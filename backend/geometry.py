@@ -72,7 +72,35 @@ def _vertical_overlap(a: Box, b: Box) -> float:
     return max(0.0, min(a.bottom, b.bottom) - max(a.top, b.top))
 
 
-def _belong_together(a: Box, b: Box) -> bool:
+def _has_reading_order_separator(a: Box, b: Box, separators: list[Box] | None) -> bool:
+    """Return whether nearby ordinary text proves stacked boxes are separate.
+
+    A word such as ``or`` placed to the left of the second display equation is
+    strong reading-order evidence that the two visually close boxes should not
+    be joined as a fraction.  Text inside either box is deliberately ignored:
+    it is often the page OCR's imperfect reading of the formula itself.
+    """
+
+    if not separators:
+        return False
+    center_a = (a.top + a.bottom) / 2
+    center_b = (b.top + b.bottom) / 2
+    lo, hi = sorted((center_a, center_b))
+    left = min(a.left, b.left)
+    right = max(a.right, b.right)
+    height = min(a.height, b.height) or 1.0
+    for separator in separators:
+        center = (separator.top + separator.bottom) / 2
+        if not (lo <= center <= hi):
+            continue
+        # The separator must sit alongside, rather than within, the proposed
+        # formula union.  A generous vertical tolerance accommodates italics.
+        if separator.right <= left - 0.08 * height or separator.left >= right + 0.08 * height:
+            return True
+    return False
+
+
+def _belong_together(a: Box, b: Box, separators: list[Box] | None = None) -> bool:
     """Decide whether two detected fragments are parts of one formula.
 
     Three situations are merged:
@@ -102,13 +130,20 @@ def _belong_together(a: Box, b: Box) -> bool:
     horizontal_overlap = _horizontal_overlap(a, b)
     if horizontal_overlap >= 0.6 * narrow:
         vertical_gap = max(a.top, b.top) - min(a.bottom, b.bottom)
-        if 0 <= vertical_gap <= 0.5 * reference:
+        center_offset = abs((a.left + a.right) / 2 - (b.left + b.right) / 2)
+        if (
+            0 <= vertical_gap <= 0.5 * reference
+            and center_offset <= 0.18 * narrow
+            and not _has_reading_order_separator(a, b, separators)
+        ):
             return True
 
     return False
 
 
-def merge_fragmented_boxes(boxes: list[Box]) -> list[Box]:
+def merge_fragmented_boxes(
+    boxes: list[Box], *, separators: list[Box] | None = None
+) -> list[Box]:
     """Union every group of fragments that belongs to one formula.
 
     Runs to a fixed point so chains merge fully: numerator↔bar↔denominator
@@ -122,7 +157,7 @@ def merge_fragmented_boxes(boxes: list[Box]) -> list[Box]:
         result: list[Box] = []
         for box in merged:
             for index, existing in enumerate(result):
-                if _belong_together(existing, box):
+                if _belong_together(existing, box, separators):
                     result[index] = existing.union(box)
                     changed = True
                     break
@@ -151,6 +186,7 @@ def plan_regions(
     boxes: list[Box],
     *,
     assume_small_is_formula: bool = True,
+    separators: list[Box] | None = None,
 ) -> list[Box] | None:
     """Choose between whole-image recognition and per-region recognition.
 
@@ -160,7 +196,7 @@ def plan_regions(
     """
 
     image_area = max(1.0, image_width * image_height)
-    merged = merge_fragmented_boxes(boxes)
+    merged = merge_fragmented_boxes(boxes, separators=separators)
 
     if not merged:
         small = image_area <= SMALL_IMAGE_AREA

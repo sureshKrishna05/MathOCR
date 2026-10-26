@@ -30,6 +30,7 @@ and testable — without any ML package installed.
 from __future__ import annotations
 
 import importlib.util
+import io
 import logging
 import os
 import re
@@ -37,10 +38,10 @@ import shutil
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from statistics import median
-from typing import Protocol
+from typing import Any, Protocol
 
 from PIL import Image
 
@@ -93,6 +94,26 @@ class RegionResult:
     alternatives: list[Candidate] = field(default_factory=list)
     box: tuple[int, int, int, int] | None = None
     kind: str = "isolated"  # isolated | embedded | full
+    numbering: str | None = None
+    review_flags: list[str] = field(default_factory=list)
+    asset_id: str | None = None
+    fallback_image: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MathDetection:
+    """One raw formula-detector result, kept for review before region planning.
+
+    The detector is deliberately not trusted as a source of truth.  Keeping its
+    category, score (when a backend supplies one), and source index lets the
+    document path explain why a box was accepted, retained for review, or
+    rejected without deleting the corresponding page pixels.
+    """
+
+    box: Box
+    category: str
+    confidence: float | None = None
+    source_index: int = 0
 
 
 class FormulaEngine(Protocol):
@@ -203,12 +224,17 @@ class MathDetector:
 
         self._model = MathFormulaDetector(model_name="mfd-1.5", model_backend="onnx", device=device)
 
-    def detect(self, image: Image.Image) -> list[tuple[Box, str]]:
-        """Return (box, category) pairs; category is 'isolated' or 'embedded'."""
+    def detect_detailed(self, image: Image.Image) -> list[MathDetection]:
+        """Return raw detections with the backend's category and score.
+
+        MFD versions do not all expose a confidence field, therefore ``None``
+        is preserved rather than pretending an inferred geometry score came
+        from the model.
+        """
 
         detections = self._model.detect(image, resized_shape=768)
-        regions: list[tuple[Box, str]] = []
-        for detection in detections:
+        regions: list[MathDetection] = []
+        for source_index, detection in enumerate(detections, start=1):
             points = detection.get("box")
             if points is None:
                 continue
@@ -217,8 +243,25 @@ class MathDetector:
             category = str(detection.get("type", "isolated"))
             if category in ("embedding", "embedded"):
                 category = "embedded"
-            regions.append((Box(min(xs), min(ys), max(xs), max(ys)), category))
+            raw_score = detection.get("score", detection.get("confidence"))
+            try:
+                score = float(raw_score) if raw_score is not None else None
+            except (TypeError, ValueError):
+                score = None
+            regions.append(
+                MathDetection(
+                    Box(min(xs), min(ys), max(xs), max(ys)),
+                    category,
+                    score,
+                    source_index,
+                )
+            )
         return regions
+
+    def detect(self, image: Image.Image) -> list[tuple[Box, str]]:
+        """Return legacy ``(box, category)`` pairs for callers and plugins."""
+
+        return [(item.box, item.category) for item in self.detect_detailed(image)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +271,9 @@ class TextLine:
     box: Box
     text: str
     confidence: float
+    engine: str = ""
+    background_color: str | None = None
+    foreground_color: str | None = None
 
 
 def find_tesseract_binary() -> str | None:
@@ -297,17 +343,9 @@ class TesseractTextEngine:
                 confidence = float(data["conf"][index])
             except (TypeError, ValueError):
                 confidence = -1.0
-            if confidence >= 0 and confidence < 30:
-                clean_w = word.strip()
-                # Retain short tokens, numbers, punctuation, and abbreviations for review instead of discarding
-                is_meaningful = (
-                    len(clean_w) <= 4
-                    or clean_w.isupper()
-                    or any(c.isdigit() for c in clean_w)
-                    or any(c in ".,;:()[]{}%+-=<>/" for c in clean_w)
-                )
-                if not is_meaningful and confidence < 15:
-                    continue
+            # Keep even low-confidence words.  A later layout decision may
+            # retain them as the only reading of a small label; discarding at
+            # this stage made omissions impossible to audit or recover.
             key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
             grouped.setdefault(key, []).append(index)
 
@@ -347,6 +385,7 @@ class TesseractTextEngine:
                         box=Box(min(lefts), min(tops), max(rights), max(bottoms)),
                         text=text,
                         confidence=sum(confidences) / len(confidences) / 100.0,
+                        engine=self.id,
                     )
                 )
         return lines
@@ -387,6 +426,7 @@ class RapidOcrTextEngine:
                         box=Box(min(xs), min(ys), max(xs), max(ys)),
                         text=stripped,
                         confidence=float(score) if score is not None else 1.0,
+                        engine=self.id,
                     )
                 )
         # Tuple return style ((result_list, elapse_list))
@@ -404,9 +444,155 @@ class RapidOcrTextEngine:
                             box=Box(min(xs), min(ys), max(xs), max(ys)),
                             text=stripped,
                             confidence=float(score) if score is not None else 1.0,
+                            engine=self.id,
                         )
                     )
         return lines
+
+
+class EnsembleTextEngine:
+    """Choose the most reliable fully-local text reading for one page.
+
+    Tesseract remains important for Greek material, while RapidOCR is often
+    substantially stronger on small, anti-aliased English screenshots.  Mixing
+    their lines produces duplicates, so this class retains each raw reading and
+    selects one complete reading using confidence, coverage, and character
+    plausibility.  The rejected reading stays available through ``last_audit``.
+    """
+
+    id = "ensemble"
+
+    def __init__(self, engines: list[Any]) -> None:
+        self._engines = engines
+        self.last_audit: dict[str, Any] = {}
+
+    @staticmethod
+    def _score(lines: list[TextLine]) -> float:
+        if not lines:
+            return -1.0
+        weighted_confidence = sum(
+            max(0.0, min(1.0, line.confidence)) * max(1.0, line.box.width)
+            for line in lines
+        )
+        coverage = sum(max(1.0, line.box.width) for line in lines)
+        text = " ".join(line.text for line in lines)
+        alphanumeric = sum(ch.isalnum() for ch in text)
+        printable = sum(ch.isprintable() and not ch.isspace() for ch in text)
+        plausibility = alphanumeric / max(1, printable)
+        # Coverage is deliberately a small component: a formula OCR can emit
+        # many tiny fragments, but it should not beat a confident page reader.
+        return weighted_confidence / max(1.0, coverage) + 0.08 * plausibility + min(0.12, len(lines) / 600.0)
+
+    def read_lines(self, image: Image.Image) -> list[TextLine]:
+        readings: dict[str, list[TextLine]] = {}
+        failures: dict[str, str] = {}
+        for engine in self._engines:
+            try:
+                readings[engine.id] = engine.read_lines(image)
+            except Exception as error:
+                logger.warning("Text engine %s failed: %s", engine.id, error)
+                failures[engine.id] = f"{type(error).__name__}: {error}"
+
+        scores = {engine_id: self._score(lines) for engine_id, lines in readings.items()}
+        selected_id = max(scores, key=scores.get) if scores else ""
+        selected = readings.get(selected_id, [])
+        self.last_audit = {
+            "selected_engine": selected_id,
+            "scores": {key: round(value, 4) for key, value in scores.items()},
+            "line_counts": {key: len(value) for key, value in readings.items()},
+            "failures": failures,
+            "raw_lines": {
+                key: [
+                    {
+                        "text": line.text,
+                        "confidence": round(line.confidence, 4),
+                        "box": _box_tuple(line.box),
+                    }
+                    for line in lines
+                ]
+                for key, lines in readings.items()
+            },
+        }
+        return _annotate_source_styles(image, selected)
+
+
+def _box_tuple(box: Box) -> tuple[int, int, int, int]:
+    return (int(box.left), int(box.top), int(box.right), int(box.bottom))
+
+
+def _hex_color(red: int, green: int, blue: int) -> str:
+    return f"{red:02X}{green:02X}{blue:02X}"
+
+
+def _annotate_source_styles(image: Image.Image, lines: list[TextLine]) -> list[TextLine]:
+    """Attach conservative source colour hints to OCR lines.
+
+    This is intentionally only a colour sampler, not a classifier: a coloured
+    dominant background becomes paragraph shading, and a strongly saturated
+    foreground becomes a run colour.  Neutral paper and anti-aliased black
+    text stay unstyled.  Keeping the thresholds conservative avoids applying a
+    template colour merely because of compression noise.
+    """
+
+    annotated: list[TextLine] = []
+    rgb = image.convert("RGB")
+    for line in lines:
+        box = line.box.clamped(rgb.width, rgb.height)
+        if box.width < 2 or box.height < 2:
+            annotated.append(line)
+            continue
+        crop = rgb.crop((int(box.left), int(box.top), int(box.right), int(box.bottom)))
+        # Bounded sampling prevents a full-resolution page from making style
+        # recovery expensive while retaining enough pixels for small text.
+        crop.thumbnail((180, 48))
+        pixels = list(crop.get_flattened_data()) if hasattr(crop, "get_flattened_data") else list(crop.getdata())
+        crop.close()
+        if not pixels:
+            annotated.append(line)
+            continue
+
+        quantized: dict[tuple[int, int, int], int] = {}
+        for red, green, blue in pixels:
+            key = (red // 16 * 16, green // 16 * 16, blue // 16 * 16)
+            quantized[key] = quantized.get(key, 0) + 1
+        dominant, dominant_count = max(quantized.items(), key=lambda item: item[1])
+        dr, dg, db = dominant
+        chroma = max(dominant) - min(dominant)
+        background = None
+        if dominant_count >= max(4, int(0.12 * len(pixels))) and chroma >= 24:
+            # Do not treat dark coloured glyphs as a page-wide background.
+            if (dr + dg + db) >= 250:
+                background = _hex_color(dr, dg, db)
+
+        saturated = [
+            (red, green, blue)
+            for red, green, blue in pixels
+            if max(red, green, blue) - min(red, green, blue) >= 60
+            and red + green + blue <= 650
+        ]
+        foreground = None
+        # True colored text has a substantial fraction of saturated pixels (>= 12%),
+        # whereas chromatic aberration at black-white glyph edges only produces 1-3% fringing.
+        if len(saturated) >= max(20, int(0.12 * len(pixels))):
+            sr = sum(pixel[0] for pixel in saturated) // len(saturated)
+            sg = sum(pixel[1] for pixel in saturated) // len(saturated)
+            sb = sum(pixel[2] for pixel in saturated) // len(saturated)
+            if max(sr, sg, sb) - min(sr, sg, sb) >= 45:
+                foreground = _hex_color(sr, sg, sb)
+
+        # White type on a coloured marker is visually important even though it
+        # is not a saturated foreground.  The run background keeps the marker
+        # editable in Word rather than converting it into an image.
+        if background and (dr + dg + db) < 510:
+            foreground = "FFFFFF"
+        annotated.append(
+            replace(
+                line,
+                background_color=background,
+                foreground_color=foreground,
+            )
+        )
+    return annotated
 
 
 class NougatEngine:
@@ -422,7 +608,35 @@ class NougatEngine:
         _require("nougat", "nougat-ocr")
         import torch
         from nougat import NougatModel
+        from nougat.model import BARTDecoder
         from nougat.utils.device import move_to_device
+
+        # Patch BARTDecoder.prepare_inputs_for_inference to accept **kwargs (e.g. cache_position in transformers >= 4.41)
+        orig_prepare = getattr(BARTDecoder, "_orig_prepare_inputs_for_inference", None)
+        if orig_prepare is None:
+            BARTDecoder._orig_prepare_inputs_for_inference = BARTDecoder.prepare_inputs_for_inference
+
+            def _compatible_prepare_inputs(
+                self,
+                input_ids,
+                encoder_outputs,
+                past=None,
+                past_key_values=None,
+                use_cache=None,
+                attention_mask=None,
+                **kwargs,
+            ):
+                return BARTDecoder._orig_prepare_inputs_for_inference(
+                    self,
+                    input_ids,
+                    encoder_outputs,
+                    past=past,
+                    past_key_values=past_key_values,
+                    use_cache=use_cache,
+                    attention_mask=attention_mask,
+                )
+
+            BARTDecoder.prepare_inputs_for_inference = _compatible_prepare_inputs
 
         from backend.model_store import ensure_nougat_model
 
@@ -516,7 +730,7 @@ class EngineRegistry:
         self._device = device
         self._engines: dict[str, FormulaEngine] = {}
         self._detector: MathDetector | None = None
-        self._text_engine: TesseractTextEngine | None = None
+        self._text_engine: Any | None = None
         self._nougat: NougatEngine | None = None
         self._lock = threading.Lock()
 
@@ -548,12 +762,16 @@ class EngineRegistry:
     def text_engine(self) -> Any:
         with self._lock:
             if self._text_engine is None:
+                readers: list[Any] = []
                 if find_tesseract_binary() is not None and importlib.util.find_spec("pytesseract") is not None:
-                    self._text_engine = TesseractTextEngine()
-                elif importlib.util.find_spec("rapidocr") is not None:
-                    self._text_engine = RapidOcrTextEngine()
-                else:
-                    self._text_engine = TesseractTextEngine()
+                    readers.append(TesseractTextEngine())
+                if importlib.util.find_spec("rapidocr") is not None:
+                    readers.append(RapidOcrTextEngine())
+                if not readers:
+                    # Preserve the existing useful error when neither local
+                    # reader is installed.
+                    readers.append(TesseractTextEngine())
+                self._text_engine = readers[0] if len(readers) == 1 else EnsembleTextEngine(readers)
             return self._text_engine
 
     def nougat_engine(self) -> NougatEngine:
@@ -682,6 +900,7 @@ class PageOutcome:
     markdown: str | None = None  # present only in document mode
     text_available: bool = True  # False when page text could not be read
     document: Any = None  # Structured Document intermediate representation
+    audit: dict[str, Any] = field(default_factory=dict)
 
 
 def _overlap_fraction(inner: Box, outer: Box) -> float:
@@ -694,6 +913,39 @@ def _overlap_fraction(inner: Box, outer: Box) -> float:
     if right <= left or bottom <= top or inner.area <= 0:
         return 0.0
     return (right - left) * (bottom - top) / inner.area
+
+
+def _parse_equation_number(text: str) -> str | None:
+    """Read a right-margin equation label such as ``(1)`` from OCR output.
+
+    Small labels are frequently mis-OCR'd (``..(1()``, ``...(2))``).  The
+    tolerant patterns below only accept a line that is *label-shaped*: at most
+    dots, parentheses, whitespace and one 1-3 digit number.  Prose containing
+    parenthesised numbers can never match because other characters are present.
+    """
+
+    if not text:
+        return None
+    stripped = text.strip()
+    clean = re.search(r"\(\s*(\d{1,3})\s*\)", stripped)
+    if clean:
+        return clean.group(1)
+    misread_close = re.search(r"\(\s*(\d{1,3})\s*\(", stripped)
+    if misread_close:
+        return misread_close.group(1)
+    whole_label = re.match(r"^[\s.()|:;]*\(\s*(\d{1,3})[\s.()|:;]*$", stripped)
+    if whole_label:
+        return whole_label.group(1)
+    return None
+
+
+def _looks_like_formula_text(text: str) -> bool:
+    """Cheap test for a short standalone formula read as ordinary text."""
+
+    stripped = text.strip()
+    if not stripped or len(stripped) > 20:
+        return False
+    return any(ch in stripped for ch in "=+/^_×÷√πλΔ∴≈≠≤≥→∫")
 
 
 def reconstruct_markdown(
@@ -744,6 +996,7 @@ class MathPipeline:
         # Model backends are not guaranteed thread-safe; recognition is
         # CPU-bound anyway, so requests take turns.
         self._inference_lock = threading.Lock()
+        self._last_math_audit: dict[str, Any] = {}
 
     def process(
         self,
@@ -758,38 +1011,179 @@ class MathPipeline:
                 return PageOutcome(regions=[self._recognize_region(image, engine, kind="full")])
             if mode == "document" and doc_engine == "nougat":
                 return self._process_with_nougat(image)
-            regions = self._recognize_page_math(image, mode, engine)
             if mode != "document":
-                return PageOutcome(regions=regions)
-            return self._assemble_document(image, regions, page_source=page_source)
+                regions = self._recognize_page_math(image, mode, engine, page_source=page_source)
+                return PageOutcome(regions=regions, audit=self._last_math_audit)
 
-    def _recognize_page_math(self, image: Image.Image, mode: str, engine: str) -> list[RegionResult]:
+            # Read the page before planning math.  Text geometry supplies the
+            # crucial evidence that a small screenshot is a document page, not
+            # a generously padded single formula crop.
+            if not text_engine_available():
+                regions = self._recognize_page_math(image, mode, engine, text_lines=[], page_source=page_source)
+                return PageOutcome(
+                    regions=regions,
+                    markdown=None,
+                    text_available=False,
+                    audit=self._last_math_audit,
+                )
+            try:
+                text_engine = self._registry.text_engine()
+                text_lines = text_engine.read_lines(image)
+                text_audit = dict(getattr(text_engine, "last_audit", {}))
+            except Exception as error:
+                logger.warning("Text recognition failed: %s", error)
+                regions = self._recognize_page_math(image, mode, engine, text_lines=[], page_source=page_source)
+                return PageOutcome(
+                    regions=regions,
+                    markdown=None,
+                    text_available=False,
+                    audit=self._last_math_audit,
+                )
+
+            regions = self._recognize_page_math(image, mode, engine, text_lines=text_lines, page_source=page_source)
+            audit = {**self._last_math_audit, "text": text_audit}
+            return self._assemble_document(
+                image,
+                regions,
+                text_lines=text_lines,
+                page_source=page_source,
+                audit=audit,
+            )
+
+    def _recognize_page_math(
+        self,
+        image: Image.Image,
+        mode: str,
+        engine: str,
+        text_lines: list[TextLine] | None = None,
+        page_source: Any | None = None,
+    ) -> list[RegionResult]:
         started = time.perf_counter()
-        detected = self._registry.detector().detect(image)
+        self._equation_label_boxes: list[Box] = []
+        detector = self._registry.detector()
+        if hasattr(detector, "detect_detailed"):
+            detected_details = detector.detect_detailed(image)
+        else:  # Test doubles and third-party plugins retain the original API.
+            detected_details = [
+                MathDetection(box=box, category=category, source_index=index)
+                for index, (box, category) in enumerate(detector.detect(image), start=1)
+            ]
         logger.info(
             "Math detection timing | image=%sx%s | detections=%s | elapsed=%.2fs",
             image.width,
             image.height,
-            len(detected),
+            len(detected_details),
             time.perf_counter() - started,
         )
-        boxes = [box for box, _category in detected]
-        regions = plan_regions(image.width, image.height, boxes, assume_small_is_formula=True)
+        table_cell_rects = getattr(page_source, "table_cell_rects", None) if page_source else None
+        accepted, review, upgrades, upgraded_indexes = self._filter_math_detections(
+            image,
+            detected_details,
+            text_lines if mode == "document" else None,
+        )
+        boxes = [item.box for item in accepted]
+        separators = [line.box for line in text_lines or []]
+        regions = plan_regions(
+            image.width,
+            image.height,
+            boxes,
+            # Only explicit formula mode is permitted to interpret a small
+            # empty image as a formula.  Mixed/document inputs are pages.
+            assume_small_is_formula=(mode == "mixed" and text_lines is None),
+            separators=separators,
+        )
+        self._last_math_audit = {
+            "detected_math_regions": [
+                {
+                    "id": item.source_index,
+                    "box": _box_tuple(item.box),
+                    "category": item.category,
+                    "confidence": item.confidence,
+                    "decision": (
+                        "upgraded-to-display"
+                        if item.source_index in upgraded_indexes
+                        else ("accepted" if item in accepted else "review")
+                    ),
+                }
+                for item in detected_details
+            ],
+            "review_math_regions": review,
+            "upgraded_math_regions": upgrades,
+            "planned_math_regions": [] if regions is None else [_box_tuple(box) for box in regions],
+            "whole_image_formula": regions is None,
+        }
         if regions is None:
-            return [self._recognize_region(image, engine, kind="full")]
+            full_asset_id: str | None = None
+            try:
+                from backend.assets import default_asset_store
+
+                asset = default_asset_store.store_image(
+                    image,
+                    source_page=1,
+                    bbox=(0, 0, image.width, image.height),
+                    metadata={
+                        "purpose": "math-region-crop",
+                        "kind": "full",
+                        "coordinate_space": "image_pixels",
+                        "source_bbox": (0, 0, image.width, image.height),
+                    },
+                )
+                full_asset_id = asset.asset_id
+            except Exception as store_err:
+                logger.warning("Could not store full image asset: %s", store_err)
+
+            full_res = self._recognize_region(image, engine, kind="full")
+            full_res.box = (0, 0, image.width, image.height)
+            full_res.asset_id = full_asset_id
+            self._validate_region_result(full_res)
+            return [full_res]
 
         results: list[RegionResult] = []
         for region in regions:
-            kind = self._region_kind(region, detected)
+            kind = self._region_kind(region, [(item.box, item.category) for item in accepted])
             crop_box = padded_crop_box(region, image.width, image.height)
-            crop = image.crop(
-                (int(crop_box.left), int(crop_box.top), int(crop_box.right), int(crop_box.bottom))
+            crop_tuple = (
+                int(crop_box.left),
+                int(crop_box.top),
+                int(crop_box.right),
+                int(crop_box.bottom),
             )
+            crop = image.crop(crop_tuple)
+            crop_asset_id: str | None = None
+            try:
+                from backend.assets import default_asset_store
+
+                asset = default_asset_store.store_image(
+                    crop,
+                    source_page=1,
+                    bbox=crop_tuple,
+                    metadata={
+                        "purpose": "math-region-crop",
+                        "kind": kind,
+                        "coordinate_space": "image_pixels",
+                        "source_bbox": crop_tuple,
+                    },
+                )
+                crop_asset_id = asset.asset_id
+            except Exception as store_err:
+                logger.warning("Could not store equation crop asset: %s", store_err)
+
             try:
                 result = self._recognize_region(crop, engine, kind=kind)
             finally:
                 crop.close()
             if not result.latex:
+                if kind != "embedded" and crop_asset_id:
+                    fallback_res = RegionResult(
+                        latex=r"\text{[equation]}",
+                        engine=engine,
+                        confidence=0.0,
+                        box=(int(region.left), int(region.top), int(region.right), int(region.bottom)),
+                        kind=kind,
+                        asset_id=crop_asset_id,
+                        fallback_image=True,
+                    )
+                    results.append(fallback_res)
                 continue
             if kind == "embedded" and _is_trivial_embedded(result.latex):
                 continue
@@ -799,44 +1193,321 @@ class MathPipeline:
                 int(region.right),
                 int(region.bottom),
             )
+            result.asset_id = crop_asset_id
+            self._validate_region_result(result)
+            if crop_asset_id:
+                try:
+                    from backend.assets import default_asset_store
+
+                    asset_obj = default_asset_store.get(crop_asset_id)
+                    if asset_obj:
+                        asset_obj.metadata.update(
+                            {
+                                "confidence": result.confidence,
+                                "recognized_candidate": result.latex,
+                                "fallback_reason": (
+                                    ", ".join(result.review_flags) if result.review_flags else None
+                                ),
+                                "render_mode": "image_fallback" if result.fallback_image else "omml",
+                            }
+                        )
+                except Exception:
+                    pass
             results.append(result)
+        if text_lines:
+            self._associate_equation_numbers(image, results, text_lines)
         return results
+
+    def _filter_math_detections(
+        self,
+        image: Image.Image,
+        detections: list[MathDetection],
+        text_lines: list[TextLine] | None,
+    ) -> tuple[list[MathDetection], list[dict[str, Any]], list[dict[str, Any]], set[int]]:
+        """Rank detector output before sending crops to a formula recognizer.
+
+        In document mode, isolated detector boxes are plausible display math.
+        Embedded boxes are only accepted if ordinary OCR has not already read
+        the same region.  The latter rule prevents a coloured example sentence
+        from becoming a formula solely because it contains a few symbols.
+        Unaccepted boxes are stored as crop assets for review, never silently
+        treated as deleted page content.
+        """
+        accepted: list[MathDetection] = []
+        review: list[dict[str, Any]] = []
+        upgrades: list[dict[str, Any]] = []
+        upgraded_indexes: set[int] = set()
+        min_width = max(18.0, image.width * 0.025)
+        min_height = max(8.0, image.height * 0.012)
+        for detection in detections:
+            reason: str | None = None
+            covering_line: TextLine | None = None
+            if detection.box.width < min_width or detection.box.height < min_height:
+                reason = "too small to be a complete formula region"
+            elif text_lines is not None and detection.category == "embedded":
+                max_text_overlap = 0.0
+                for line in text_lines:
+                    overlap = _overlap_fraction(detection.box, line.box)
+                    if overlap > max_text_overlap:
+                        max_text_overlap = overlap
+                        covering_line = line
+                if max_text_overlap >= 0.45:
+                    if self._is_numbered_display_candidate(image, detection, covering_line, text_lines):
+                        # OCR read the formula as a short text line and the
+                        # right margin carries its equation number: treat the
+                        # region as display math so the number stays attached
+                        # and the line is re-read by the formula engines.
+                        upgraded = replace(detection, category="isolated")
+                        accepted.append(upgraded)
+                        upgraded_indexes.add(detection.source_index)
+                        upgrades.append(
+                            {
+                                "id": detection.source_index,
+                                "box": _box_tuple(detection.box),
+                                "covering_text": covering_line.text if covering_line else "",
+                                "reason": "short formula text with aligned equation number label",
+                            }
+                        )
+                        continue
+                    reason = "embedded region is already covered by an OCR text line"
+                elif (
+                    detection.box.width < 0.06 * image.width
+                    or detection.box.height < 0.016 * image.height
+                ):
+                    reason = "small inline symbol retained in text OCR rather than promoted to formula"
+
+            if reason is None:
+                accepted.append(detection)
+                continue
+
+            crop_asset_id = self._store_review_crop(image, detection, reason)
+            review.append(
+                {
+                    "id": detection.source_index,
+                    "box": _box_tuple(detection.box),
+                    "category": detection.category,
+                    "confidence": detection.confidence,
+                    "reason": reason,
+                    "source_crop_asset_id": crop_asset_id,
+                }
+            )
+        return accepted, review, upgrades, upgraded_indexes
+
+    @staticmethod
+    def _is_numbered_display_candidate(
+        image: Image.Image,
+        detection: MathDetection,
+        covering_line: TextLine | None,
+        text_lines: list[TextLine],
+    ) -> bool:
+        """Detect an OCR-read short formula that carries a numbered label.
+
+        A detector box classified as ``embedded`` is normally left in ordinary
+        text.  But when the covering text is itself a short formula-like line
+        *and* a label-shaped line such as ``...(2)`` sits to its right at the
+        same height, the source clearly shows a numbered display equation that
+        plain OCR happened to read correctly as text.
+        """
+
+        if covering_line is None:
+            return False
+        if not _looks_like_formula_text(covering_line.text):
+            return False
+        horizontal_overlap = _overlap_fraction(covering_line.box, detection.box)
+        if horizontal_overlap < 0.55:
+            return False
+        line_center_y = (covering_line.box.top + covering_line.box.bottom) / 2
+        tolerance = max(16.0, detection.box.height * 0.9)
+        for line in text_lines:
+            if line is covering_line:
+                continue
+            if line.box.left < max(detection.box.right + 4, image.width * 0.72):
+                continue
+            if abs((line.box.top + line.box.bottom) / 2 - line_center_y) > tolerance:
+                continue
+            if _parse_equation_number(line.text):
+                return True
+        return False
+
+    @staticmethod
+    def _store_review_crop(
+        image: Image.Image, detection: MathDetection, reason: str
+    ) -> str | None:
+        """Retain a rejected detector crop in the normal in-memory asset store."""
+
+        try:
+            from backend.assets import default_asset_store
+
+            crop_box = padded_crop_box(detection.box, image.width, image.height)
+            crop = image.crop(
+                (int(crop_box.left), int(crop_box.top), int(crop_box.right), int(crop_box.bottom))
+            )
+            try:
+                asset = default_asset_store.store_image(
+                    crop,
+                    source_page=1,
+                    bbox=_box_tuple(detection.box),
+                    metadata={
+                        "purpose": "math-region-review",
+                        "detector_category": detection.category,
+                        "reason": reason,
+                    },
+                )
+                return asset.asset_id
+            finally:
+                crop.close()
+        except Exception as error:
+            logger.warning("Could not retain review crop for math region %s: %s", detection.source_index, error)
+            return None
+
+    @staticmethod
+    def _validate_region_result(result: RegionResult) -> None:
+        """Flag weak mathematical readings and mark fallback_image when below threshold."""
+
+        if result.confidence is not None and result.confidence < 0.80:
+            result.review_flags.append(f"low ensemble confidence ({result.confidence:.2f} < 0.80)")
+            result.fallback_image = True
+        if result.alternatives:
+            best_alternative = max(
+                (similarity(result.latex, alternative.latex) for alternative in result.alternatives),
+                default=1.0,
+            )
+            if best_alternative < 0.45:
+                result.review_flags.append("formula engines substantially disagree")
+                result.fallback_image = True
+        if structure_score(result.latex) < 0.45:
+            result.review_flags.append("formula failed structural sanity check")
+            result.fallback_image = True
+
+    def _associate_equation_numbers(
+        self,
+        image: Image.Image,
+        results: list[RegionResult],
+        text_lines: list[TextLine],
+    ) -> None:
+        """Attach right-side equation labels to their display-math blocks.
+
+        The label is read separately from the formula crop.  This avoids asking
+        a formula model to interpret ellipses and tiny numerals, and preserves
+        the label as metadata rather than an unrelated body paragraph.
+        """
+
+        label_boxes: list[Box] = []
+        events: list[dict[str, Any]] = []
+        for result in results:
+            if result.kind == "embedded" or result.box is None:
+                continue
+            formula_box = Box(*result.box)
+            center_y = (formula_box.top + formula_box.bottom) / 2
+            nearby = [
+                line
+                for line in text_lines
+                if line.box.left >= max(formula_box.right + 4, image.width * 0.72)
+                and abs((line.box.top + line.box.bottom) / 2 - center_y)
+                <= max(16.0, formula_box.height * 0.9)
+            ]
+            nearby.sort(key=lambda line: (abs((line.box.top + line.box.bottom) / 2 - center_y), line.box.left))
+            raw = " ".join(line.text for line in nearby[:2])
+            number = _parse_equation_number(raw)
+            if number:
+                result.numbering = number
+                label_boxes.extend(line.box for line in nearby[:2])
+                events.append({"formula_box": result.box, "number": result.numbering, "source": "page OCR"})
+                continue
+
+            # If page OCR read the formula number as punctuation/noise, a small
+            # high-resolution right-margin crop is much more reliable.  It is
+            # still an OCR result, never a number inferred from equation order.
+            possible_right_label = bool(nearby) or formula_box.right < 0.65 * image.width
+            number = self._read_equation_number_crop(image, formula_box) if possible_right_label else None
+            if number:
+                result.numbering = number
+                label_boxes.extend(line.box for line in nearby[:2])
+                events.append({"formula_box": result.box, "number": number, "source": "label crop OCR"})
+            elif nearby:
+                result.review_flags.append("possible equation number could not be read")
+                events.append({"formula_box": result.box, "number": None, "source": "unreadable page OCR"})
+
+        self._equation_label_boxes = label_boxes
+        self._last_math_audit["equation_numbers"] = events
+
+    @staticmethod
+    def _read_equation_number_crop(image: Image.Image, formula_box: Box) -> str | None:
+        if importlib.util.find_spec("pytesseract") is None or find_tesseract_binary() is None:
+            return None
+        # The right margin is deliberately bounded: applying a text recognizer
+        # to the entire row would merely repeat formula OCR's weak result.
+        left = int(max(formula_box.right + 4, image.width * 0.72))
+        right = int(image.width * 0.97)
+        top = int(max(0, formula_box.top - max(10.0, formula_box.height * 0.35)))
+        bottom = int(min(image.height, formula_box.bottom + max(10.0, formula_box.height * 0.35)))
+        if right <= left + 8 or bottom <= top + 8:
+            return None
+        crop = image.crop((left, top, right, bottom)).convert("L")
+        try:
+            crop = crop.resize((crop.width * 4, crop.height * 4), Image.Resampling.LANCZOS)
+            import pytesseract
+
+            pytesseract.pytesseract.tesseract_cmd = find_tesseract_binary() or "tesseract"
+            for psm in (7, 8, 11, 6):
+                reading = pytesseract.image_to_string(crop, lang="eng", config=f"--psm {psm}")
+                match = _parse_equation_number(reading)
+                if match:
+                    return match
+        except Exception as error:
+            logger.debug("Equation-number crop OCR failed: %s", error)
+        finally:
+            crop.close()
+        return None
 
     def _assemble_document(
         self,
         image: Image.Image,
         regions: list[RegionResult],
+        text_lines: list[TextLine],
         page_source: Any | None = None,
+        audit: dict[str, Any] | None = None,
     ) -> PageOutcome:
         """Add page text, figures, and geometry around the recognized formulas to build a document."""
 
-        if not text_engine_available():
-            return PageOutcome(regions=regions, markdown=None, text_available=False)
-        try:
-            text_lines = self._registry.text_engine().read_lines(image)
-        except Exception as error:
-            logger.warning("Text recognition failed: %s", error)
-            return PageOutcome(regions=regions, markdown=None, text_available=False)
-
-        # Drop text that sits on top of a formula; it is the mangled formula.
+        # Suppress only a line substantially covered by an accepted *display*
+        # formula.  The previous symmetric 45%/75% test could drop an entire
+        # sentence because one small inline detector box crossed a word.
         math_boxes = [Box(*result.box) for result in regions if result.box is not None]
-        kept_text = [
-            line
-            for line in text_lines
-            if all(
-                _overlap_fraction(line.box, math_box) < 0.45
-                and _overlap_fraction(math_box, line.box) < 0.75
-                for math_box in math_boxes
-            )
+        display_boxes = [
+            Box(*result.box)
+            for result in regions
+            if result.box is not None and result.kind != "embedded"
         ]
+        equation_label_boxes = getattr(self, "_equation_label_boxes", [])
+        kept_text: list[TextLine] = []
+        suppressed_text: list[dict[str, Any]] = []
+        for line in text_lines:
+            if any(_overlap_fraction(line.box, label) >= 0.7 for label in equation_label_boxes):
+                suppressed_text.append(
+                    {"text": line.text, "box": _box_tuple(line.box), "reason": "equation number label"}
+                )
+                continue
+            formula_overlap = max((_overlap_fraction(line.box, box) for box in display_boxes), default=0.0)
+            if formula_overlap >= 0.60:
+                suppressed_text.append(
+                    {"text": line.text, "box": _box_tuple(line.box), "reason": "covered by display formula"}
+                )
+                continue
+            kept_text.append(line)
 
         figures = []
         table_cell_rects = []
         page_num = 1
         if page_source is not None:
-            figures = list(getattr(page_source, "figures", []))
+            raw_figures = list(getattr(page_source, "figures", []))
             table_cell_rects = list(getattr(page_source, "table_cell_rects", []))
             page_num = getattr(page_source, "page_number", 1)
+            # Filter out figures that overlap with detected math regions (equations are not diagrams)
+            for fig in raw_figures:
+                math_overlap = max((_overlap_fraction(fig.box, mbox) for mbox in math_boxes), default=0.0)
+                if math_overlap < 0.35:
+                    figures.append(fig)
             if getattr(page_source, "is_scanned", False) and not figures:
                 from backend.layout import detect_scanned_figures
 
@@ -859,8 +1530,31 @@ class MathPipeline:
             table_cell_rects=table_cell_rects,
             page_number=page_num,
         )
+        document_audit = dict(audit or {})
+        document_audit["kept_text_lines"] = [
+            {
+                "text": line.text,
+                "confidence": round(line.confidence, 4),
+                "engine": line.engine,
+                "box": _box_tuple(line.box),
+            }
+            for line in kept_text
+        ]
+        document_audit["suppressed_text_lines"] = suppressed_text
+        doc.metadata["ocr_audit"] = document_audit
+        for result in regions:
+            for flag in result.review_flags:
+                doc.warnings.append(
+                    f"Equation at {result.box or 'unknown region'} requires review: {flag}."
+                )
+        review_regions = document_audit.get("review_math_regions", [])
+        if review_regions:
+            doc.warnings.append(
+                f"{len(review_regions)} math detector regions were retained in the OCR audit with source crops "
+                "rather than exported as standalone equations."
+            )
         markdown = doc.to_markdown()
-        return PageOutcome(regions=regions, markdown=markdown, document=doc)
+        return PageOutcome(regions=regions, markdown=markdown, document=doc, audit=document_audit)
 
     def _process_with_nougat(self, image: Image.Image) -> PageOutcome:
         markdown = self._registry.nougat_engine().recognize_document(image)
@@ -928,6 +1622,25 @@ class MathPipeline:
                 time.perf_counter() - started,
             )
             return RegionResult(latex="", engine="none", confidence=None, kind=kind)
+
+        # OMML validation fallback: if the elected winner fails Pandoc conversion,
+        # fallback to the highest-scoring alternative that converts cleanly.
+        if alternatives:
+            from backend.omml import validate_equation
+
+            winner_valid, _ = validate_equation(winner.latex)
+            if not winner_valid:
+                for alt in alternatives:
+                    alt_valid, _ = validate_equation(alt.latex)
+                    if alt_valid and structure_score(alt.latex) >= 0.5:
+                        logger.info(
+                            "Winner formula from %s failed OMML validation; promoted valid alternative from %s",
+                            winner.engine,
+                            alt.engine,
+                        )
+                        alternatives = [winner] + [a for a in alternatives if a.engine != alt.engine]
+                        winner = alt
+                        break
         logger.info(
             "Formula recognition timing | kind=%s | engines=%s | candidates=%s | elapsed=%.2fs",
             kind,

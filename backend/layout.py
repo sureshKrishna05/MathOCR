@@ -59,13 +59,13 @@ CAPTION_PATTERN = re.compile(
 )
 
 HEADING_NUMBER_PATTERN = re.compile(
-    r"^(\d+(\.\d+)*)\.?\s+([A-Z\u0370-\u03ff].*)$"
+    r"^(\d+(?:\s*\.\s*\d+)*)\.?\s+([A-Z\u0370-\u03ff].*)$"
 )
 
 ACADEMIC_SECTION_KEYWORDS = re.compile(
     r"^(Abstract|Introduction|Theoretical Background|Methods|Methodology|Experimental|Results|"
-    r"Discussion|Conclusion|References|Bibliography|Appendix|Theorem|Definition|Lemma|"
-    r"Proposition|Proof|Example|Exercise|Problem|Overview|Preliminaries)\b",
+    r"Discussion|Conclusion|References|Bibliography|Appendix|Exercises|Problems|"
+    r"Overview|Preliminaries)\b",
     re.IGNORECASE,
 )
 
@@ -156,17 +156,43 @@ def filter_headers_footers(
     headers: list[tuple[Box, str, Any]] = []
     footers: list[tuple[Box, str, Any]] = []
 
-    top_margin = 0.08 * page_height
+    # Treat only the extreme top edge as a possible running header.  A tight
+    # crop can begin within a paragraph, and a larger header zone was removing
+    # valid opening lines from screenshots.
+    top_margin = 0.05 * page_height
     bottom_margin = 0.92 * page_height
+    header_zone = 0.09 * page_height
+
+    # 1. Identify running header cues in the top zone to group all elements on the running header row
+    cue_centers: list[float] = []
+    for item in blocks:
+        box, kind, payload = item
+        if kind != "text":
+            continue
+        center_y = (box.top + box.bottom) / 2
+        if center_y < header_zone:
+            text = payload.text.strip()
+            is_cue = bool(
+                re.search(r"\b(?:Chap\.|Chapter)\s*\d+\b", text, re.I)
+                or re.match(r"^Sec\.\s*\d+(?:\.\d+)*\b", text, re.I)
+                or re.match(r"^[—–-]?\s*\d+\s*[—–-]?$", text)
+                or re.search(r"\b(?:Running Header|Header)\b", text, re.I)
+            ) and not re.match(r"^\s*(?:Theorem|Lemma|Proposition|Definition|Example|Exercise|Problem)\b", text, re.I)
+            if is_cue:
+                cue_centers.append(center_y)
 
     for item in blocks:
         box, kind, payload = item
         center_y = (box.top + box.bottom) / 2
         text = payload.text.strip() if kind == "text" else getattr(payload, "latex", "")
 
-        # Header check (top 8% of page)
-        if center_y < top_margin and kind == "text":
-            if len(text) < 100 and not text.endswith((".", ":")):
+        # Header check (top 9% of page)
+        if center_y < header_zone and kind == "text":
+            is_row_peer = any(abs(center_y - cue_y) <= 18.0 for cue_y in cue_centers)
+            words = re.findall(r"[A-Za-zÀ-ÿΑ-ω]+", text)
+            looks_like_prose = len(words) >= 8 and any(word[:1].islower() for word in words[1:])
+            not_prose_block = not re.match(r"^\s*(?:Theorem|Lemma|Proposition|Definition|Example|Exercise|Problem)\b", text, re.I)
+            if (is_row_peer or (center_y < top_margin and len(text) < 100 and not looks_like_prose)) and not_prose_block:
                 headers.append(item)
                 continue
 
@@ -176,7 +202,11 @@ def filter_headers_footers(
             if re.match(r"^[—–-]?\s*\d+\s*[—–-]?$", text) or re.match(r"^Page\s+\d+", text, re.I):
                 footers.append(item)
                 continue
-            if len(text) < 40:
+            # Copyright / publisher / metadata lines
+            if (
+                re.search(r"\b(copyright|isbn|doi|all rights reserved|printed in|published by|issn)\b", text, re.I)
+                or text.startswith("©")
+            ):
                 footers.append(item)
                 continue
 
@@ -221,9 +251,15 @@ def associate_captions(
                     best_caption_text = text
                     break
 
-            # If no explicit "Figure", check if short text sits immediately below (within 1.5 line heights)
-            # and horizontal centers align
-            if 0 <= dist_below <= 1.8 * line_height and dist_below < min_dist:
+            # Only accept implicit captions if short, title-cased, non-numbered, and non-prose
+            looks_like_short_title = (
+                len(text) < 35
+                and not re.match(r"^\s*\d", text)
+                and not text.endswith((".", "!", "?", ",", ";", ":"))
+                and (text.istitle() or text.isupper())
+                and not any(w in text.lower().split() for w in ("in", "which", "where", "we", "call", "is", "are", "let", "the", "that", "this", "and"))
+            )
+            if looks_like_short_title and 0 <= dist_below <= 1.5 * line_height and dist_below < min_dist:
                 fig_center = (fig.box.left + fig.box.right) / 2
                 text_center = (tbox.left + tbox.right) / 2
                 if abs(fig_center - text_center) < (fig.box.right - fig.box.left) * 0.4:
@@ -253,23 +289,55 @@ def classify_heading_semantic(
     if not plain or len(plain) > 100:
         return False, 1, "left"
 
-    # Avoid trailing sentence punctuation
-    if plain.endswith((".", ",", ";", ":")):
-        # Only exception is numbered section like "1. Introduction" where only the number has dot
-        if not re.match(r"^\d+(\.\d+)*\.?\s+[A-Za-z]", plain):
-            return False, 1, "left"
-
     box_width = box.right - box.left
     box_center = (box.left + box.right) / 2
     page_center = page_width / 2 if page_width > 0 else 0
-    is_centered = (page_width > 0) and abs(box_center - page_center) < 0.12 * page_width and box_width < 0.85 * page_width
+    is_centered = (
+        page_width > 0
+        and abs(box_center - page_center) < 0.08 * page_width
+        and abs(box.left - (page_width - box.right)) < 0.08 * page_width
+        and box_width < 0.85 * page_width
+    )
     align = "center" if is_centered else "left"
+
+    # Titled theorems in research papers e.g. "Theorem 3.4 (Uniqueness of Solutions)" are headings
+    if re.match(r"^\s*(?:Theorem|Lemma|Proposition|Definition|Corollary)\s+\d+(?:\.\d+)*\s*\([A-Z]", plain, re.I):
+        return True, 2, align
+
+    # Other theorem / lemma / definition / axiom statements are body theorem blocks, not headings
+    if re.match(r"^\s*(?:Theorem|Lemma|Proposition|Definition|Corollary|Axiom|Proof|Example)\b", plain, re.I):
+        return False, 1, "left"
+
+    # Section title "Exercises" / "Problems" is centered
+    if re.match(r"^\s*(?:exercises|problems)\b", plain, re.I) and len(plain) < 30:
+        return True, 2, "center"
+
+    # Avoid trailing sentence punctuation (headings never end in comma, semicolon, or colon)
+    if plain.endswith((",", ";", ":")):
+        return False, 1, "left"
+    if plain.endswith(".") and not re.match(r"^\d+(?:\s*\.\s*\d+)*\.?\s+[A-Za-z0-9]", plain):
+        return False, 1, "left"
 
     # 1. Explicit numbering: e.g. "1. Introduction", "2.1 Methods", "3.1.2 Analysis"
     m_num = HEADING_NUMBER_PATTERN.match(plain)
     if m_num:
-        num_part = m_num.group(1)
+        num_part = re.sub(r"\s+", "", m_num.group(1))
+        after_num = m_num.group(2).strip()
         dots = num_part.count(".")
+        if dots == 0:
+            # Single-integer numbered line: check if it is an exercise problem, axiom, list item, or sentence
+            is_exercise_or_problem = bool(
+                re.match(
+                    r"^(?:Verify|Prove|Show|Find|Solve|Let|Test|Determine|Calculate|Evaluate|"
+                    r"State|Construct|Describe|Give|Check|Compute|Consider|Suppose|Assume|"
+                    r"Demonstrate|Explain|Is|Are|If|Given|Recall|In\s+Exercise)\b",
+                    after_num,
+                    re.I,
+                )
+            )
+            has_predicate = bool(re.search(r"\b(is|are|was|were|has|have)\b", after_num, re.I))
+            if is_exercise_or_problem or has_predicate or len(after_num.split()) > 4 or plain.endswith((".", "?", "!", ",", ";", ":")):
+                return False, 1, "left"
         level = min(6, 1 + dots if dots > 0 else 2)
         return True, level, align
 
@@ -316,9 +384,9 @@ def detect_table_groups_geometry(
             for rect in table_cell_rects
         )
 
-        # Check column count
+        # Check column count and ensure it is not already an equation block
         col_count = len(curr_row)
-        if col_count < 2 and not has_cell_rect:
+        if (col_count < 2 and not has_cell_rect) or any(k == "display" for _b, k, _p in curr_row):
             r_idx += 1
             continue
 
@@ -381,3 +449,4 @@ def detect_table_groups_geometry(
             r_idx += 1
 
     return tables
+

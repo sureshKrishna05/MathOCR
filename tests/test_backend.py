@@ -153,6 +153,7 @@ def _fake_model_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     root = tmp_path / "models"
     monkeypatch.setenv("MATHOCR_MODEL_DIR", str(root))
     monkeypatch.setenv("PIX2TEXT_HOME", str(root / "pix2text"))
+    monkeypatch.setenv("NOUGAT_CHECKPOINT", str(root / "nougat"))
     # Isolate from any real legacy cache in the developer's home directory.
     monkeypatch.setattr(model_store.Path, "home", staticmethod(lambda: tmp_path / "home"))
     (root / "pix2text" / "1.1" / "mfr-1.5-onnx").mkdir(parents=True)
@@ -194,12 +195,15 @@ def test_models_deletion_rejects_unknown_engine() -> None:
     assert response.status_code == 404
 
 
-def test_models_inventory_marks_nougat_downloadable() -> None:
+def test_models_inventory_marks_nougat_downloadable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import backend.app as app_module
+
+    monkeypatch.setattr(app_module, "nougat_ready", lambda: False)
     response = client.get("/api/models")
     nougat = next(e for e in response.json()["engines"] if e["id"] == "nougat")
     assert nougat["role"] == "optional"
     assert nougat["downloadable"] is True
-    # With the package absent in CI, Nougat is not ready to use yet.
+    # When Nougat is not ready, inventory reflects that.
     assert nougat["ready"] is False
 
 

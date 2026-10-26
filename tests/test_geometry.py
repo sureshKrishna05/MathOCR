@@ -36,6 +36,21 @@ def test_distinct_display_equations_on_a_page_stay_separate() -> None:
     assert len(merged) == 2
 
 
+def test_adjacent_display_equations_with_an_offside_connector_stay_separate() -> None:
+    """An adjacent word such as “or” is layout evidence, not a fraction fragment."""
+    first = Box(260, 290, 365, 326)
+    second = Box(262, 330, 378, 359)
+    connector = Box(140, 336, 160, 352)
+    assert merge_fragmented_boxes([first, second], separators=[connector]) == [first, second]
+
+
+def test_stacked_boxes_with_different_centres_stay_separate() -> None:
+    """Consecutive display equations may be close vertically but shift horizontally."""
+    first = Box(255, 543, 395, 574)
+    second = Box(242, 576, 514, 610)
+    assert merge_fragmented_boxes([first, second]) == [first, second]
+
+
 def test_side_by_side_column_equations_stay_separate() -> None:
     left_column = Box(50, 100, 300, 160)
     right_column = Box(500, 100, 750, 160)  # far apart horizontally
