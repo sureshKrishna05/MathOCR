@@ -297,8 +297,17 @@ class TesseractTextEngine:
                 confidence = float(data["conf"][index])
             except (TypeError, ValueError):
                 confidence = -1.0
-            if confidence < 30:  # drop low-confidence noise (often mangled math)
-                continue
+            if confidence >= 0 and confidence < 30:
+                clean_w = word.strip()
+                # Retain short tokens, numbers, punctuation, and abbreviations for review instead of discarding
+                is_meaningful = (
+                    len(clean_w) <= 4
+                    or clean_w.isupper()
+                    or any(c.isdigit() for c in clean_w)
+                    or any(c in ".,;:()[]{}%+-=<>/" for c in clean_w)
+                )
+                if not is_meaningful and confidence < 15:
+                    continue
             key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
             grouped.setdefault(key, []).append(index)
 
@@ -692,303 +701,27 @@ def reconstruct_markdown(
     math_results: list[RegionResult],
     page_height: float,
     page_width: float = 0.0,
+    figures: list[Any] | None = None,
+    table_cell_rects: list[Box] | None = None,
+    page_number: int = 1,
 ) -> str:
-    """Interleave text lines and recognized formulas into reading-order Markdown.
+    """Interleave text lines, math results, and figures into reading-order Markdown.
 
-    Blocks are clustered into visual rows by vertical position. Rows that hold
-    ordinary text render inline math with single ``$`` delimiters; rows that are
-    purely a display equation render it as a ``$$`` block. Headings, bullet
-    lists, paragraph gaps, and tables are recognized and structured.
+    Constructs the canonical Document representation and renders it to Markdown,
+    guaranteeing that the structured document and editable Markdown are in 100% agreement.
     """
+    from backend.document import Document
 
-    valid_lines: list[TextLine] = []
-    for line in text_lines:
-        txt = line.text.strip()
-        # Filter out running page header at top margin (<6% of page height)
-        if line.box.top < 0.06 * page_height and line.box.height < 0.035 * page_height:
-            continue
-        # Filter out running page footer at bottom margin (>94% of page height)
-        if line.box.bottom > 0.94 * page_height and (
-            re.match(r"^[—–-]?\s*\d+\s*[—–-]?$", txt) or len(txt) < 10
-        ):
-            continue
-        valid_lines.append(line)
-
-    blocks: list[tuple[Box, str, str]] = []  # (box, kind, payload) kind in text|inline|display
-    for line in valid_lines:
-        blocks.append((line.box, "text", line.text))
-    for result in math_results:
-        if not result.latex or result.box is None:
-            continue
-        box = Box(*result.box)
-        # Skip math boxes inside running header/footer margin
-        if box.top < 0.06 * page_height or box.bottom > 0.94 * page_height:
-            continue
-        kind = "inline" if result.kind == "embedded" else "display"
-        blocks.append((box, kind, result.latex))
-    if not blocks:
-        return ""
-
-    blocks.sort(key=lambda item: (item[0].top, item[0].left))
-    heights = [box.height for box, _kind, _payload in blocks if box.height > 0]
-    med_h = median(heights) if heights else 0.02 * page_height
-    tolerance = 0.6 * med_h
-
-    rows: list[list[tuple[Box, str, str]]] = []
-    for block in blocks:
-        center = (block[0].top + block[0].bottom) / 2
-        if rows and abs(center - _row_center(rows[-1])) <= tolerance:
-            rows[-1].append(block)
-        else:
-            rows.append([block])
-
-    paragraphs: list[str] = []
-    text_buffer: list[str] = []
-
-    def flush_text() -> None:
-        if text_buffer:
-            paragraphs.append(" ".join(text_buffer).strip())
-            text_buffer.clear()
-
-    i = 0
-    num_rows = len(rows)
-
-    while i < num_rows:
-        row = rows[i]
-        row.sort(key=lambda item: item[0].left)
-
-        # Paragraph gap check between rows
-        if i > 0 and text_buffer:
-            prev_row = rows[i - 1]
-            prev_bottom = max(b[0].bottom for b in prev_row)
-            curr_top = min(b[0].top for b in row)
-            if curr_top - prev_bottom > 1.8 * med_h:
-                flush_text()
-
-        has_text = any(kind == "text" for _box, kind, _payload in row)
-        only_display = all(kind == "display" for _box, kind, _payload in row)
-
-        # 1. Standalone display equation
-        if only_display and not has_text:
-            flush_text()
-            for _box, _kind, latex in row:
-                paragraphs.append(f"$$\n{latex}\n$$")
-            i += 1
-            continue
-
-        # 2. Main Title detection (near top of document, row 0 or 1, top < 0.35 * page_height)
-        if len(row) == 1 and row[0][1] == "text":
-            plain = row[0][2].strip()
-            box = row[0][0]
-            center_x = (box.left + box.right) / 2
-            width = box.right - box.left
-            is_centered = (
-                page_width > 0
-                and abs(center_x - page_width / 2) < 0.14 * page_width
-                and width < 0.85 * page_width
-            )
-            is_prominent = box.height > 1.20 * med_h or is_centered
-            if (
-                box.top < 0.35 * page_height
-                and not any(p.startswith("#") or p.startswith("<p align=") for p in paragraphs)
-                and is_prominent
-                and len(plain) < 120
-                and not plain.endswith((".", ",", ";", ":"))
-                and not plain.lower().startswith(("table", "figure"))
-                and not re.match(r"^\d+(\.\d+)*\.?\s+", plain)
-                and not re.match(r"^[¢•*–—\-]\s+", plain)
-            ):
-                # Check if next row is title continuation
-                if (
-                    i + 1 < num_rows
-                    and len(rows[i + 1]) == 1
-                    and rows[i + 1][0][1] == "text"
-                ):
-                    next_plain = rows[i + 1][0][2].strip()
-                    next_box = rows[i + 1][0][0]
-                    if (
-                        next_box.top - box.bottom < 2.0 * med_h
-                        and not re.match(r"^\d+(\.\d+)*\.?\s+", next_plain)
-                        and not re.match(r"^[¢•*–—\-]\s+", next_plain)
-                        and len(next_plain) < 80
-                        and not next_plain.endswith((".", ",", ";", ":"))
-                    ):
-                        plain = f"{plain} {next_plain}"
-                        i += 1
-                flush_text()
-                if is_centered:
-                    paragraphs.append(f'<p align="center"># {plain}</p>')
-                else:
-                    paragraphs.append(f"# {plain}")
-                i += 1
-                continue
-
-        # 3. Section Headings (e.g., "1. Introduction...", "2. Experimental...")
-        if len(row) == 1 and row[0][1] == "text":
-            plain = row[0][2].strip()
-            box = row[0][0]
-            center_x = (box.left + box.right) / 2
-            width = box.right - box.left
-            is_centered = (
-                page_width > 0
-                and abs(center_x - page_width / 2) < 0.12 * page_width
-                and width < 0.80 * page_width
-            )
-            # Numbered section: "1. Heading", "2.1 Subheading"
-            m_sect = re.match(r"^(\d+(\.\d+)*)\.?\s+([A-Z].*)$", plain)
-            if m_sect and len(plain) < 95 and not plain.endswith((".", ",", ";", ":")):
-                flush_text()
-                if is_centered:
-                    paragraphs.append(f'<p align="center">## {plain}</p>')
-                else:
-                    paragraphs.append(f"## {plain}")
-                i += 1
-                continue
-
-        # 4. Bullet items: lines starting with ¢, •, -, *
-        if has_text and len(row) >= 1 and row[0][1] == "text":
-            first_txt = row[0][2].lstrip()
-            if re.match(r"^[¢•*]\s+", first_txt):
-                flush_text()
-                converted_first = re.sub(r"^[¢•*]\s+", "- ", first_txt)
-                pieces = [converted_first]
-                for _box, kind, payload in row[1:]:
-                    pieces.append(payload if kind == "text" else f"${payload}$")
-                paragraphs.append(" ".join(pieces).strip())
-                i += 1
-                continue
-
-        # 5. Table detection: Check for table header lines or tabular data rows
-        row_text = " ".join(payload for _b, kind, payload in row if kind == "text")
-        low_row = row_text.lower()
-        if (
-            ("quantum state" in low_row or "relative error" in low_row or "measured" in low_row)
-            and ("formulation" in low_row or "theoretical" in low_row or "energy" in low_row)
-        ) or (
-            "transition energy" in low_row and ("<0.00" in low_row or "error" in low_row or "%" in low_row or "energy" in low_row)
-        ):
-            flush_text()
-            # If it's a single continuation row (e.g. from page 2):
-            if "transition energy" in low_row and not any(k in low_row for k in ["quantum state", "ground state"]):
-                c1_math = "\\Delta E_{0\\to 1} = \\hbar\\omega"
-                for _b, k, p in row:
-                    if "\\Delta" in p or "E_{0" in p or "E_{" in p:
-                        c1_math = p
-                table_lines = [
-                    "| Quantum State / Transition | Theoretical Formulation | Measured Frequency / Energy | Relative Error |",
-                    "| --- | --- | --- | --- |",
-                    f"| Transition Energy | ${c1_math}$ | $1.00004\\,\\hbar\\,\\omega$ | $<0.004\\,\\%$ |",
-                ]
-                paragraphs.append("\n".join(table_lines))
-                i += 1
-                continue
-
-            # Full table header:
-            table_lines = [
-                "| Quantum State / Transition | Theoretical Formulation | Measured Frequency / Energy | Relative Error |",
-                "| --- | --- | --- | --- |",
-            ]
-            i += 1
-            # Skip subsequent continuation header lines if any
-            while i < num_rows:
-                h_test = " ".join(p for _b, k, p in rows[i] if k == "text").lower()
-                if any(k in h_test for k in ["transition", "formulation", "frequency", "energy"]) and not any(
-                    k in h_test for k in ["ground state", "first excited", "second excited", "excited"]
-                ):
-                    i += 1
-                else:
-                    break
-
-            # Parse data rows until non-table row
-            while i < num_rows:
-                curr_r = rows[i]
-                r_txt = " ".join(p for _b, k, p in curr_r if k == "text")
-                r_low = r_txt.lower()
-                is_data_row = any(
-                    k in r_low for k in ["ground state", "first excited", "second excited", "transition", "state"]
-                ) or any(
-                    any(sym in p for sym in ["E_{0}", "E_{1}", "E_{2}", "\\Delta E", "0.500", "1.499", "2.500"])
-                    for _b, k, p in curr_r
-                    if k != "text"
-                )
-                if not is_data_row:
-                    break
-
-                # Distribute row items into 4 column bins
-                col0_items, col1_items, col2_items, col3_items = [], [], [], []
-                for box, kind, payload in sorted(curr_r, key=lambda x: x[0].left):
-                    item_str = payload if kind == "text" else f"${payload}$"
-                    # Clean up OCR noise from table text lines
-                    if kind == "text":
-                        if "ground state" in payload.lower():
-                            item_str = "Ground State ($n=0$)"
-                        elif "first excited" in payload.lower():
-                            item_str = "First Excited ($n=1$)"
-                        elif "second excited" in payload.lower():
-                            item_str = "Second Excited ($n=2$)"
-                        elif "transition" in payload.lower():
-                            item_str = "Transition Energy"
-                    # Skip stray (n=0), (n=1), (n=2) math items since they are attached to column 0 text
-                    if (
-                        kind != "text"
-                        and "n" in payload
-                        and any(d in payload for d in "012")
-                        and not any(sym in payload for sym in ["E_", "\\psi", "\\omega", "\\hbar"])
-                    ):
-                        continue
-
-                    center_x = (box.left + box.right) / 2
-                    if center_x < 360:
-                        col0_items.append(item_str)
-                    elif center_x < 570:
-                        col1_items.append(item_str)
-                    elif center_x < 790:
-                        col2_items.append(item_str)
-                    else:
-                        col3_items.append(item_str)
-
-                c0 = " ".join(col0_items).strip() or "-"
-                c1 = " ".join(col1_items).strip() or "-"
-                c2 = " ".join(col2_items).strip() or "-"
-                c3 = " ".join(col3_items).strip() or "-"
-                table_lines.append(f"| {c0} | {c1} | {c2} | {c3} |")
-                i += 1
-
-            paragraphs.append("\n".join(table_lines))
-            # Skip any stray trailing table fragment rows right after the table (e.g. "n = 2)")
-            if i < num_rows:
-                after_txt = " ".join(p for _b, _k, p in rows[i])
-                if (
-                    "n" in after_txt
-                    and any(d in after_txt for d in "012")
-                    and not any(sym in after_txt for sym in ["E_", "\\psi", "\\omega", "\\hbar", "Introduction", "Theoretical"])
-                ):
-                    i += 1
-            continue
-
-        # 6. Normal text / inline math row
-        # Check alignment of single text row
-        if len(row) == 1 and row[0][1] == "text" and not text_buffer:
-            box = row[0][0]
-            center_x = (box.left + box.right) / 2
-            width = box.right - box.left
-            if page_width > 0 and abs(center_x - page_width / 2) < 0.10 * page_width and width < 0.70 * page_width:
-                paragraphs.append(f'<p align="center">{row[0][2].strip()}</p>')
-                i += 1
-                continue
-            if page_width > 0 and box.left > 0.55 * page_width and (page_width - box.right) < 0.15 * page_width:
-                paragraphs.append(f'<p align="right">{row[0][2].strip()}</p>')
-                i += 1
-                continue
-
-        pieces = []
-        for _box, kind, payload in row:
-            pieces.append(payload if kind == "text" else f"${payload}$")
-        text_buffer.append(" ".join(pieces))
-        i += 1
-
-    flush_text()
-    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+    doc = Document.from_layout(
+        text_lines=text_lines,
+        math_results=math_results,
+        page_height=page_height,
+        page_width=page_width,
+        figures=figures,
+        table_cell_rects=table_cell_rects,
+        page_number=page_number,
+    )
+    return doc.to_markdown()
 
 
 def _row_center(row: list[tuple[Box, str, str]]) -> float:
@@ -1013,7 +746,12 @@ class MathPipeline:
         self._inference_lock = threading.Lock()
 
     def process(
-        self, image: Image.Image, mode: str, engine: str = "auto", doc_engine: str = "layout"
+        self,
+        image: Image.Image,
+        mode: str,
+        engine: str = "auto",
+        doc_engine: str = "layout",
+        page_source: Any | None = None,
     ) -> PageOutcome:
         with self._inference_lock:
             if mode == "formula":
@@ -1023,7 +761,7 @@ class MathPipeline:
             regions = self._recognize_page_math(image, mode, engine)
             if mode != "document":
                 return PageOutcome(regions=regions)
-            return self._assemble_document(image, regions)
+            return self._assemble_document(image, regions, page_source=page_source)
 
     def _recognize_page_math(self, image: Image.Image, mode: str, engine: str) -> list[RegionResult]:
         started = time.perf_counter()
@@ -1064,8 +802,13 @@ class MathPipeline:
             results.append(result)
         return results
 
-    def _assemble_document(self, image: Image.Image, regions: list[RegionResult]) -> PageOutcome:
-        """Add page text around the recognized formulas to build a document."""
+    def _assemble_document(
+        self,
+        image: Image.Image,
+        regions: list[RegionResult],
+        page_source: Any | None = None,
+    ) -> PageOutcome:
+        """Add page text, figures, and geometry around the recognized formulas to build a document."""
 
         if not text_engine_available():
             return PageOutcome(regions=regions, markdown=None, text_available=False)
@@ -1086,9 +829,37 @@ class MathPipeline:
                 for math_box in math_boxes
             )
         ]
-        markdown = reconstruct_markdown(kept_text, regions, image.height, image.width)
+
+        figures = []
+        table_cell_rects = []
+        page_num = 1
+        if page_source is not None:
+            figures = list(getattr(page_source, "figures", []))
+            table_cell_rects = list(getattr(page_source, "table_cell_rects", []))
+            page_num = getattr(page_source, "page_number", 1)
+            if getattr(page_source, "is_scanned", False) and not figures:
+                from backend.layout import detect_scanned_figures
+
+                occupied = math_boxes + [l.box for l in kept_text]
+                figures = detect_scanned_figures(image, occupied, page_num=page_num)
+        else:
+            from backend.layout import detect_scanned_figures
+
+            occupied = math_boxes + [l.box for l in kept_text]
+            figures = detect_scanned_figures(image, occupied, page_num=page_num)
+
         from backend.document import Document
-        doc = Document.from_layout(kept_text, regions, image.height, image.width)
+
+        doc = Document.from_layout(
+            kept_text,
+            regions,
+            page_height=image.height,
+            page_width=image.width,
+            figures=figures,
+            table_cell_rects=table_cell_rects,
+            page_number=page_num,
+        )
+        markdown = doc.to_markdown()
         return PageOutcome(regions=regions, markdown=markdown, document=doc)
 
     def _process_with_nougat(self, image: Image.Image) -> PageOutcome:

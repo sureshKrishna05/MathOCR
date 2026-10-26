@@ -2,7 +2,7 @@
 ; Support development: https://paypal.me/christosbouronikos
 
 #define MyAppName "Qryptex"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "Qryptex"
 #define MyAppURL "https://qryptex.in"
 #define MyAppExeName "MathOCR.exe"

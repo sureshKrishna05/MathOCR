@@ -883,6 +883,41 @@ function renderMarkdownPreview(markdown, target) {
       }
     }
 
+    // Images / Figures
+    const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
+    if (imgMatch) {
+      const figure = document.createElement("figure");
+      figure.className = "preview-figure";
+      if (blockAlign) figure.style.textAlign = blockAlign;
+      const img = document.createElement("img");
+      const src = imgMatch[2].trim();
+      if (src.startsWith("asset:")) {
+        img.src = `${normalizedApiUrl()}/api/assets/${src.slice(6)}`;
+      } else if (/^[0-9a-fA-F]{16,64}$/.test(src)) {
+        img.src = `${normalizedApiUrl()}/api/assets/${src}`;
+      } else {
+        img.src = src;
+      }
+      img.alt = imgMatch[1].trim() || "Figure";
+      img.style.maxWidth = "100%";
+      img.style.height = "auto";
+      img.style.borderRadius = "4px";
+      img.style.display = "block";
+      img.style.margin = blockAlign === "center" ? "0 auto" : (blockAlign === "right" ? "0 0 0 auto" : "0");
+      figure.append(img);
+      if (imgMatch[1].trim()) {
+        const figcap = document.createElement("figcaption");
+        figcap.style.fontSize = "0.85rem";
+        figcap.style.color = "var(--text-muted, #666)";
+        figcap.style.marginTop = "4px";
+        figcap.style.fontStyle = "italic";
+        figcap.textContent = imgMatch[1].trim();
+        figure.append(figcap);
+      }
+      target.append(figure);
+      continue;
+    }
+
     const paragraph = document.createElement("p");
     if (blockAlign) {
       paragraph.style.textAlign = blockAlign;
@@ -1012,8 +1047,26 @@ async function downloadDocumentWord() {
   button.textContent = t("buildingWord");
   try {
     const template = elements.docTemplate ? elements.docTemplate.value : "academic_textbook";
+    let combinedDocument = null;
+    if (state.documents && state.documents.length > 0) {
+      const allElements = [];
+      const allMetadata = {};
+      state.documents.forEach((d) => {
+        if (d.document && Array.isArray(d.document.elements)) {
+          allElements.push(...d.document.elements);
+          if (d.document.metadata) Object.assign(allMetadata, d.document.metadata);
+        }
+      });
+      if (allElements.length > 0) {
+        combinedDocument = {
+          title: t("documentTitle"),
+          elements: allElements,
+          metadata: allMetadata,
+        };
+      }
+    }
     await triggerDocxDownload(
-      { title: t("documentTitle"), markdown, template },
+      { title: t("documentTitle"), markdown, document: combinedDocument, template },
       `Qryptex Document.docx`
     );
   } catch (error) {

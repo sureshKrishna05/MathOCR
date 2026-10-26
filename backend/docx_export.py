@@ -15,6 +15,7 @@ intermediate representation, with:
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 import zipfile
@@ -28,6 +29,8 @@ from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
 from docx.shared import Inches, Pt, RGBColor
 from lxml import etree
+
+from backend.assets import default_asset_store
 
 from backend.document import (
     BlockElement,
@@ -249,6 +252,7 @@ def build_docx_from_document(
     output_path: Path | str,
     pandoc_path: str | None = None,
     template: TemplatePreset = "academic_textbook",
+    asset_store: Any | None = None,
 ) -> list[str]:
     """Build an editable DOCX file from a Document and return any warnings.
 
@@ -305,7 +309,7 @@ def build_docx_from_document(
         elif isinstance(element, PageBreak):
             doc.add_page_break()
         elif isinstance(element, ImageBlock):
-            _add_image_block(doc, element, warnings, config)
+            _add_image_block(doc, element, warnings, config, asset_store=asset_store)
 
     # Save to disk
     doc.save(str(output))
@@ -755,37 +759,82 @@ def _add_image_block(
     image_block: ImageBlock,
     warnings: list[str],
     config: TemplateConfig,
+    asset_store: Any | None = None,
 ) -> None:
-    """Embed an image with optional centered caption."""
+    """Embed an image with source layout alignment, derived width, and optional caption."""
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    align_map = {
+        "left": WD_ALIGN_PARAGRAPH.LEFT,
+        "right": WD_ALIGN_PARAGRAPH.RIGHT,
+        "center": WD_ALIGN_PARAGRAPH.CENTER,
+    }
+    p.alignment = align_map.get(image_block.alignment, WD_ALIGN_PARAGRAPH.CENTER)
     p.paragraph_format.space_before = Pt(8)
     p.paragraph_format.space_after = Pt(4)
     p.paragraph_format.keep_with_next = bool(image_block.caption)
 
+    # Calculate derived width within printable margins
+    max_w_in = max(1.5, config.page_width_in - (config.left_margin_in + config.right_margin_in))
+    if image_block.width is not None and image_block.width > 0:
+        width = Inches(min(max_w_in, max(1.5, image_block.width)))
+    elif image_block.box is not None:
+        box_w = image_block.box[2] - image_block.box[0]
+        frac = min(1.0, max(0.25, box_w / 1400.0))
+        width = Inches(min(max_w_in, max(2.0, max_w_in * frac)))
+    else:
+        width = Inches(min(max_w_in, 5.2))
+
     added = False
-    if image_block.src:
+    img_stream: io.BytesIO | None = None
+
+    # 1. Resolve from asset_store
+    store = asset_store or default_asset_store
+    asset_id = image_block.asset_id
+    if not asset_id and image_block.src and image_block.src.startswith("asset:"):
+        asset_id = image_block.src[6:].strip()
+    elif not asset_id and image_block.src and re.match(r"^[0-9a-fA-F]{16,64}$", image_block.src):
+        asset_id = image_block.src
+
+    if asset_id:
+        asset = store.get(asset_id)
+        if asset and asset.data:
+            img_stream = io.BytesIO(asset.data)
+
+    # 2. Resolve from local file path if valid
+    if img_stream is None and image_block.src and not image_block.src.startswith("asset:"):
         src_path = Path(image_block.src)
         if src_path.is_file():
             try:
-                width = Inches(min(6.0, image_block.width)) if image_block.width else Inches(5.5)
-                p.add_run().add_picture(str(src_path), width=width)
-                added = True
-            except Exception as exc:
-                warnings.append(f"Could not embed image {image_block.src}: {exc}")
+                img_stream = io.BytesIO(src_path.read_bytes())
+            except Exception as read_err:
+                warnings.append(f"Could not read image file {image_block.src}: {read_err}")
+
+    if img_stream is not None:
+        try:
+            p.add_run().add_picture(img_stream, width=width)
+            added = True
+        except Exception as exc:
+            warnings.append(f"Could not embed image: {exc}")
 
     if not added:
-        r = p.add_run(f"[Figure: {image_block.caption or image_block.src or 'Image'}]")
+        r = p.add_run(f"[Figure: {image_block.caption or 'Image'}]")
         r.font.name = config.body_font
         r.italic = True
         r.font.color.rgb = RGBColor(128, 128, 128)
 
     if image_block.caption:
         cap_p = doc.add_paragraph()
-        cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap_p.alignment = p.alignment
         cap_p.paragraph_format.space_before = Pt(2)
         cap_p.paragraph_format.space_after = Pt(8)
-        cap_r = cap_p.add_run(f"Figure: {image_block.caption}")
+        cap_p.paragraph_format.keep_with_next = False
+        cap_clean = image_block.caption.strip()
+        if cap_clean.lower().startswith(("figure", "fig.", "illustration", "diagram", "chart")):
+            label = cap_clean
+        else:
+            label = f"Figure: {cap_clean}"
+        cap_r = cap_p.add_run(label)
         cap_r.font.name = config.body_font
         cap_r.italic = True
         cap_r.font.size = Pt(9.5)
@@ -810,9 +859,24 @@ def verify_docx_file(path: Path | str) -> list[str]:
 
             xml_content = zf.read("word/document.xml").decode("utf-8")
 
-        # Verify OMML namespace
-        if "schemas.openxmlformats.org/officeDocument/2006/math" not in xml_content:
-            warnings.append("Document root missing OMML math namespace")
+            # Verify OMML namespace
+            if "schemas.openxmlformats.org/officeDocument/2006/math" not in xml_content:
+                warnings.append("Document root missing OMML math namespace")
+
+            # Verify image relationships
+            if "word/_rels/document.xml.rels" in namelist:
+                rels_xml = zf.read("word/_rels/document.xml.rels").decode("utf-8")
+                for target in re.findall(r'Target="(media/[^"]+)"', rels_xml):
+                    full_target = f"word/{target}"
+                    if full_target not in namelist:
+                        warnings.append(f"Referenced image {target} missing from DOCX package")
+
+            # Verify no raw LaTeX commands leak into body text outside OMML
+            text_runs = re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml_content)
+            for t_text in text_runs:
+                if re.search(r"\\(begin|frac|dfrac|sqrt|int|sum)\b", t_text):
+                    warnings.append(f"Raw LaTeX detected in text run: {t_text[:40]}")
+                    break
 
     except zipfile.BadZipFile:
         return ["Generated file is not a valid ZIP/DOCX archive"]

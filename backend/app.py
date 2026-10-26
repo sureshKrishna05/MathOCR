@@ -32,7 +32,7 @@ from typing import Annotated, Any, Literal
 import pypdfium2 as pdfium
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field, field_validator
@@ -40,8 +40,10 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from backend import model_store
-from backend.document import DisplayEquation, Document
+from backend.assets import default_asset_store
+from backend.document import DisplayEquation, Document, reconcile_document_with_markdown
 from backend.docx_export import build_docx_from_document
+from backend.pdf_source import PageSource, extract_pdf_pages
 
 # Engine caches must be redirected below the MathOCR model folder before any
 # ML package gets imported, otherwise they fall back to scattered defaults.
@@ -380,19 +382,36 @@ def recognize_file(
     try:
         is_pdf = filename.lower().endswith(".pdf")
         if is_pdf:
-            pages, truncated = pdf_pages(data, page_limit)
+            page_sources, truncated = extract_pdf_pages(
+                data, page_limit, asset_store=default_asset_store
+            )
             if truncated:
                 warnings.append(f"{filename}: only the first {page_limit} pages were processed")
         else:
-            pages = [(1, normalized_image(data))]
-        pages_total = len(pages)
+            norm_img = normalized_image(data)
+            page_sources = [
+                PageSource(
+                    page_number=1,
+                    image=norm_img,
+                    width_pt=norm_img.width / 2.5,
+                    height_pt=norm_img.height / 2.5,
+                    scale=2.5,
+                    is_scanned=True,
+                )
+            ]
+            truncated = False
+        pages_total = len(page_sources)
 
-        for page_number, image in pages:
+        for page_source in page_sources:
+            page_number = page_source.page_number
+            image = page_source.image
             try:
-                outcome = pipeline.process(image, mode, engine, doc_engine)
+                outcome = pipeline.process(
+                    image, mode, engine, doc_engine, page_source=page_source
+                )
                 pages_processed += 1
             finally:
-                image.close()
+                page_source.close()
                 del image
                 gc.collect()
                 if "torch" in sys.modules:
@@ -955,17 +974,24 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
     temp_dir = tempfile.mkdtemp(prefix="mathocr-")
     output_path = Path(temp_dir, "equations.docx")
 
-    if request.markdown and request.markdown.strip():
-        doc = Document.from_markdown(request.markdown, title=request.title)
-    elif request.document:
+    if request.document:
         doc = Document.from_dict(request.document)
+        if request.markdown and request.markdown.strip():
+            doc = reconcile_document_with_markdown(doc, request.markdown)
+    elif request.markdown and request.markdown.strip():
+        doc = Document.from_markdown(request.markdown, title=request.title)
     else:
         elements = [DisplayEquation(latex=equation) for equation in request.equations]
         doc = Document(title=request.title, elements=elements)
 
     try:
         export_warnings = await run_in_threadpool(
-            build_docx_from_document, doc, output_path, pandoc, request.template
+            build_docx_from_document,
+            doc,
+            output_path,
+            pandoc,
+            request.template,
+            default_asset_store,
         )
     except Exception as exc:
         remove_tree(temp_dir)
@@ -1003,6 +1029,19 @@ async def export_docx(request: DocxRequest) -> FileResponse | JSONResponse:
         filename=filename,
         headers=response_headers,
         background=BackgroundTask(remove_tree, temp_dir),
+    )
+
+
+@app.get("/api/assets/{asset_id}")
+def get_asset(asset_id: str) -> Response:
+    """Safely stream an extracted figure or diagram asset to the frontend preview."""
+    asset = default_asset_store.get(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found or expired")
+    return Response(
+        content=asset.data,
+        media_type=asset.mime_type,
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

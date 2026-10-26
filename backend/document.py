@@ -388,11 +388,16 @@ class PageBreak:
 
 @dataclass(slots=True)
 class ImageBlock:
-    """An embedded image or figure reference with optional caption."""
+    """An embedded image or figure reference with optional caption and layout geometry."""
 
     src: str = ""
+    asset_id: str | None = None
     caption: str | None = None
     width: float | None = None
+    height: float | None = None
+    aspect_ratio: float | None = None
+    alignment: str = "center"  # center | left | right
+    source_page: int | None = None
     box: tuple[int, int, int, int] | None = None
     type: Literal["image"] = "image"
 
@@ -400,8 +405,13 @@ class ImageBlock:
         return {
             "type": "image",
             "src": self.src,
+            "asset_id": self.asset_id,
             "caption": self.caption,
             "width": self.width,
+            "height": self.height,
+            "aspect_ratio": self.aspect_ratio,
+            "alignment": self.alignment,
+            "source_page": self.source_page,
             "box": self.box,
         }
 
@@ -409,8 +419,13 @@ class ImageBlock:
     def from_dict(cls, data: dict[str, Any]) -> ImageBlock:
         return cls(
             src=str(data.get("src", "")),
+            asset_id=data.get("asset_id"),
             caption=data.get("caption"),
             width=data.get("width"),
+            height=data.get("height"),
+            aspect_ratio=data.get("aspect_ratio"),
+            alignment=str(data.get("alignment", "center")),
+            source_page=data.get("source_page"),
             box=tuple(data["box"]) if data.get("box") else None,
         )
 
@@ -520,7 +535,8 @@ class Document:
                 blocks.append("\n---\n")
             elif isinstance(elem, ImageBlock):
                 cap = elem.caption or ""
-                blocks.append(f"![{cap}]({elem.src})")
+                src_ref = f"asset:{elem.asset_id}" if elem.asset_id else (elem.src or "image")
+                blocks.append(f"![{cap}]({src_ref})")
 
         return "\n\n".join(b for b in blocks if b)
 
@@ -551,7 +567,12 @@ class Document:
             if m_img:
                 caption = m_img.group(1).strip() or None
                 src = m_img.group(2).strip()
-                elements.append(ImageBlock(src=src, caption=caption))
+                asset_id = None
+                if src.startswith("asset:"):
+                    asset_id = src[6:].strip()
+                elif re.match(r"^[0-9a-fA-F]{16,64}$", src):
+                    asset_id = src
+                elements.append(ImageBlock(src=src, asset_id=asset_id, caption=caption))
                 i += 1
                 continue
 
@@ -718,26 +739,59 @@ class Document:
         page_height: float,
         page_width: float,
         title: str = "MathOCR document",
+        figures: list[Any] | None = None,  # list of ExtractedFigure
+        table_cell_rects: list[Box] | None = None,
+        page_number: int = 1,
     ) -> Document:
-        """Construct structured Document from OCR geometry, detecting tables and math."""
-        blocks: list[tuple[Box, str, Any]] = []
+        """Construct structured Document from OCR geometry, detecting tables, math, and figures."""
+        from backend.layout import (
+            associate_captions,
+            classify_heading_semantic,
+            detect_table_groups_geometry,
+            filter_headers_footers,
+        )
 
-        for line in text_lines:
-            blocks.append((line.box, "text", line))
+        metadata: dict[str, Any] = {
+            "page": page_number,
+            "page_width": page_width,
+            "page_height": page_height,
+        }
 
+        # 1. Separate running headers and footers/page numbers
+        raw_text_blocks = [(line.box, "text", line) for line in text_lines]
+        body_text_blocks, header_blocks, footer_blocks = filter_headers_footers(
+            raw_text_blocks, page_height
+        )
+        if header_blocks:
+            metadata["headers"] = [p.text for _b, _k, p in header_blocks]
+        if footer_blocks:
+            metadata["footers"] = [p.text for _b, _k, p in footer_blocks]
+
+        # 2. Process figures and associate captions
+        fig_items: list[tuple[Box, str, Any]] = []
+        if figures:
+            heights = [b.height for b, _k, _p in body_text_blocks if b.height > 0]
+            med_line_h = median(heights) if heights else 0.02 * page_height
+            kept_figs, body_text_blocks = associate_captions(figures, body_text_blocks, med_line_h)
+            for fig in kept_figs:
+                fig_items.append((fig.box, "figure", fig))
+
+        # 3. Process math results
+        math_blocks: list[tuple[Box, str, Any]] = []
         for result in math_results:
             if not result.latex or result.box is None:
                 continue
             box = Box(*result.box)
             kind = "inline" if result.kind == "embedded" else "display"
-            blocks.append((box, kind, result))
+            math_blocks.append((box, kind, result))
 
+        blocks: list[tuple[Box, str, Any]] = body_text_blocks + fig_items + math_blocks
         if not blocks:
-            return cls(title=title, elements=[])
+            return cls(title=title, elements=[], metadata=metadata)
 
         blocks.sort(key=lambda item: (item[0].top, item[0].left))
-        heights = [box.height for box, _kind, _payload in blocks if box.height > 0]
-        tolerance = 0.6 * (median(heights) if heights else 0.02 * page_height)
+        heights = [box.height for box, kind, _payload in blocks if box.height > 0 and kind == "text"]
+        tolerance = 0.55 * (median(heights) if heights else 0.02 * page_height)
 
         rows: list[list[tuple[Box, str, Any]]] = []
         for block in blocks:
@@ -747,30 +801,30 @@ class Document:
             else:
                 rows.append([block])
 
-        # Detect candidate table rows: consecutive rows that have multiple columns aligning
+        # 4. Geometry-driven table detection
+        table_ranges = detect_table_groups_geometry(rows, table_cell_rects or [], page_width)
+        table_map = {start: (end, cols) for start, end, cols in table_ranges}
+
         elements: list[BlockElement] = []
         row_idx = 0
         num_rows = len(rows)
+        med_h = median(heights) if heights else 0.02 * page_height
 
         while row_idx < num_rows:
-            # Check if this row and following rows look like a table
-            table_row_count = 0
-            while (
-                row_idx + table_row_count < num_rows
-                and len(rows[row_idx + table_row_count]) >= 2
-                and not any(k == "display" for _b, k, _p in rows[row_idx + table_row_count])
-            ):
-                table_row_count += 1
-
-            if table_row_count >= 2:
-                # Group these rows into a Table
+            # Check if current row starts a table
+            if row_idx in table_map:
+                end_idx, col_clusters = table_map[row_idx]
                 table_rows: list[TableRow] = []
-                for tr_idx in range(table_row_count):
-                    curr_row = sorted(rows[row_idx + tr_idx], key=lambda x: x[0].left)
+                for tr_idx in range(row_idx, end_idx):
+                    curr_tr = sorted(rows[tr_idx], key=lambda x: x[0].left)
+                    # If we have column clusters, bin cells into columns
+                    num_cols = max(len(curr_tr), len(col_clusters))
                     cells: list[TableCell] = []
-                    for box, kind, payload in curr_row:
+                    for box, kind, payload in curr_tr:
                         if kind == "text":
                             runs = _parse_inline_text(payload.text)
+                        elif kind == "figure":
+                            runs = [TextRun(text=f"[Figure: {payload.caption or 'Diagram'}]")]
                         else:
                             runs = [InlineEquation(latex=payload.latex, box=payload.box)]
                         cells.append(
@@ -779,13 +833,42 @@ class Document:
                                 box=(int(box.left), int(box.top), int(box.right), int(box.bottom)),
                             )
                         )
-                    table_rows.append(TableRow(cells=cells, is_header=(tr_idx == 0)))
+                    table_rows.append(TableRow(cells=cells, is_header=(tr_idx == row_idx)))
                 elements.append(Table(rows=table_rows))
-                row_idx += table_row_count
+                row_idx = end_idx
                 continue
 
-            # Process single row
             curr_row = sorted(rows[row_idx], key=lambda x: x[0].left)
+
+            # Check for figure in this row
+            fig_item = next((payload for _box, kind, payload in curr_row if kind == "figure"), None)
+            if fig_item:
+                fig_box = fig_item.box
+                width_in = None
+                if page_width > 0:
+                    fraction = (fig_box.right - fig_box.left) / page_width
+                    width_in = round(max(2.0, min(6.0, 6.5 * fraction)), 2)
+                fig_align = "center"
+                fig_center = (fig_box.left + fig_box.right) / 2
+                if page_width > 0:
+                    if fig_center < 0.35 * page_width:
+                        fig_align = "left"
+                    elif fig_center > 0.65 * page_width:
+                        fig_align = "right"
+
+                elements.append(
+                    ImageBlock(
+                        asset_id=fig_item.asset_id,
+                        caption=fig_item.caption,
+                        width=width_in,
+                        alignment=fig_align,
+                        source_page=page_number,
+                        box=(int(fig_box.left), int(fig_box.top), int(fig_box.right), int(fig_box.bottom)),
+                    )
+                )
+                row_idx += 1
+                continue
+
             has_text = any(kind == "text" for _box, kind, _payload in curr_row)
             only_display = all(kind == "display" for _box, kind, _payload in curr_row)
 
@@ -799,11 +882,12 @@ class Document:
                         )
                     )
             else:
-                # Mixed row or text row
                 runs: list[RunType] = []
                 for box, kind, payload in curr_row:
                     if kind == "text":
                         runs.extend(_parse_inline_text(payload.text))
+                    elif kind == "figure":
+                        continue
                     else:
                         runs.append(
                             InlineEquation(
@@ -817,6 +901,7 @@ class Document:
                 row_right = max(b.right for b, _k, _p in curr_row)
                 row_top = min(b.top for b, _k, _p in curr_row)
                 row_bottom = max(b.bottom for b, _k, _p in curr_row)
+                row_box = Box(row_left, row_top, row_right, row_bottom)
                 row_width = row_right - row_left
                 row_center = (row_left + row_right) / 2
                 page_center = page_width / 2
@@ -828,22 +913,75 @@ class Document:
                     elif row_left > 0.55 * page_width and (page_width - row_right) < 0.15 * page_width:
                         align = "right"
 
-                # Check if this line looks like a heading
                 plain = "".join(r.text for r in runs if isinstance(r, TextRun)).strip()
-                if (
-                    len(runs) == 1
-                    and isinstance(runs[0], TextRun)
-                    and len(plain) < 60
-                    and not plain.endswith((".", ",", ";", ":"))
-                    and (plain.isupper() or plain.istitle())
-                ):
-                    elements.append(Heading(level=2, text=plain, runs=runs, alignment=align, box=(int(row_left), int(row_top), int(row_right), int(row_bottom))))
+                is_heading, level, h_align = classify_heading_semantic(plain, row_box, page_width, med_h)
+                if is_heading and len(runs) <= 3:
+                    elements.append(
+                        Heading(
+                            level=level,
+                            text=plain,
+                            runs=runs,
+                            alignment=h_align,
+                            box=(int(row_left), int(row_top), int(row_right), int(row_bottom)),
+                        )
+                    )
                 else:
-                    elements.append(Paragraph(runs=runs, alignment=align, box=(int(row_left), int(row_top), int(row_right), int(row_bottom))))
+                    elements.append(
+                        Paragraph(
+                            runs=runs,
+                            alignment=align,
+                            box=(int(row_left), int(row_top), int(row_right), int(row_bottom)),
+                        )
+                    )
 
             row_idx += 1
 
-        return cls(title=title, elements=elements)
+        return cls(title=title, elements=elements, metadata=metadata)
+
+
+def reconcile_document_with_markdown(doc: Document, markdown: str) -> Document:
+    """Reconcile user edits from Markdown while preserving structured elements and image assets."""
+    if not markdown or not markdown.strip():
+        return doc
+
+    md_doc = Document.from_markdown(markdown, title=doc.title)
+    existing_images = [e for e in doc.elements if isinstance(e, ImageBlock)]
+    img_idx = 0
+
+    reconciled_elements: list[BlockElement] = []
+    for elem in md_doc.elements:
+        if isinstance(elem, ImageBlock):
+            matched = None
+            if elem.asset_id:
+                matched = next((img for img in existing_images if img.asset_id == elem.asset_id), None)
+            if not matched and img_idx < len(existing_images):
+                matched = existing_images[img_idx]
+                img_idx += 1
+            if matched:
+                reconciled_elements.append(
+                    ImageBlock(
+                        src=matched.src or elem.src,
+                        asset_id=matched.asset_id or elem.asset_id,
+                        caption=elem.caption or matched.caption,
+                        width=matched.width or elem.width,
+                        height=matched.height or elem.height,
+                        aspect_ratio=matched.aspect_ratio or elem.aspect_ratio,
+                        alignment=matched.alignment or elem.alignment,
+                        source_page=matched.source_page or elem.source_page,
+                        box=matched.box or elem.box,
+                    )
+                )
+            else:
+                reconciled_elements.append(elem)
+        else:
+            reconciled_elements.append(elem)
+
+    return Document(
+        title=doc.title,
+        elements=reconciled_elements,
+        metadata=doc.metadata,
+        warnings=doc.warnings,
+    )
 
 
 def _row_center(row: list[tuple[Box, str, Any]]) -> float:
