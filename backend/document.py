@@ -1428,6 +1428,21 @@ def _split_text_with_inline_math(
     def tag_math(latex: str) -> str:
         return f"\x01{latex}\x02"
 
+    greek_map = {
+        "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta",
+        "ε": r"\epsilon", "θ": r"\theta", "λ": r"\lambda", "μ": r"\mu",
+        "π": r"\pi", "σ": r"\sigma", "ω": r"\omega", "Δ": r"\Delta",
+        "Ω": r"\Omega", "Σ": r"\Sigma",
+    }
+
+    def clean_math_span(expr: str) -> str:
+        s = expr
+        s = re.sub(r"(?<=[a-zA-Z\u0370-\u03ff\\])_([a-zA-Z0-9]+)\b", r"_{\1}", s)
+        for u, l in greek_map.items():
+            s = s.replace(u, l)
+        s = re.sub(r"\blambda\b", r"\\lambda", s)
+        return s.strip()
+
     patterns: list[tuple[str, Any]] = [
         # xx−1 = 1, xx-¹ = 1 -> x x^{-1} = 1
         (r"\b([a-zA-Z])([a-zA-Z])\s*[-−]?[¹²³⁴⁵⁶⁷⁸⁹⁰⁻1]+\s*=\s*1\b", lambda m: tag_math(f"{m.group(1)} {m.group(2)}^{{-1}} = 1")),
@@ -1438,6 +1453,12 @@ def _split_text_with_inline_math(
         (r"\b1x\s*=\s*x\b", lambda m: tag_math(r"1 \cdot x = x")),
         # Aij = Aji, A_ij = A_ji
         (r"\b([A-Z])([i-n])([i-n])\s*=\s*([A-Z])([i-n])([i-n])\b", lambda m: tag_math(f"{m.group(1)}_{{{m.group(2)}{m.group(3)}}} = {m.group(4)}_{{{m.group(5)}{m.group(6)}}}")),
+        # x_1 + x_2 = 0, y_1 - y_2 = 0
+        (r"(?<![a-zA-Z0-9])([a-zA-Z](?:_[a-zA-Z0-9]+|\^[a-zA-Z0-9]+|\d)?\s*[\+\-−]\s*[a-zA-Z](?:_[a-zA-Z0-9]+|\^[a-zA-Z0-9]+|\d)?\s*=\s*[0-9a-zA-Z]+)(?![a-zA-Z0-9])", lambda m: tag_math(clean_math_span(m.group(1)))),
+        # Physics relations: p = h/lambda, p = h/λ, E = mc^2, θ_i = θ_r, \theta_i = \theta_r
+        (r"(?<![a-zA-Z0-9])(\\?[a-zA-Z\u0370-\u03ff]+(?:_[a-zA-Z0-9\u0370-\u03ff]+|\^[a-zA-Z0-9]+)?\s*=\s*\\?[a-zA-Z0-9\u0370-\u03ff]+(?:_[a-zA-Z0-9\u0370-\u03ff]+|\^[a-zA-Z0-9]+)?(?:\s*[\/\*\+\-−]\s*\\?[a-zA-Z0-9\u0370-\u03ff]+(?:_[a-zA-Z0-9\u0370-\u03ff]+|\^[0-9a-zA-Z]+)?)?)(?![a-zA-Z0-9])", lambda m: tag_math(clean_math_span(m.group(1)))),
+        # Greek letter subscripts e.g. θ_i, λ_1
+        (r"\b([α-ωΑ-Ω])_([a-zA-Z0-9]+)\b", lambda m: tag_math(f"{greek_map.get(m.group(1), m.group(1))}_{{{m.group(2)}}}")),
         # x−1, x^-1, x-¹
         (r"\b([a-zA-Z])\s*[-−][¹²³⁴⁵⁶⁷⁸⁹⁰⁻]+\b", lambda m: tag_math(m.group(1) + "^{" + m.group(0)[len(m.group(1)):].strip().translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")) + "}")),
         (r"\b([a-zA-Z])\s*[¹²³⁴⁵⁶⁷⁸⁹⁰⁻]+\b", lambda m: tag_math(m.group(1) + "^{" + m.group(0)[len(m.group(1)):].strip().translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")) + "}")),
@@ -1448,15 +1469,20 @@ def _split_text_with_inline_math(
         (r"\b([A-Z])([i-n])([i-n])\b", lambda m: tag_math(f"{m.group(1)}_{{{m.group(2)}{m.group(3)}}}")),
         # x_i, x_1, A_ij
         (r"\b([a-zA-Z])_([a-zA-Z0-9]+)\b", lambda m: tag_math(f"{m.group(1)}_{{{m.group(2)}}}")),
+        (r"\b([a-zA-Z])_\{([^{}]+)\}", lambda m: tag_math(f"{m.group(1)}_{{{m.group(2)}}}")),
         # x^2, x^n, x^{-1}
         (r"\b([a-zA-Z])\^([a-zA-Z0-9]+)\b", lambda m: tag_math(f"{m.group(1)}^{{{m.group(2)}}}")),
+        (r"\b([a-zA-Z])\^\{([^{}]+)\}", lambda m: tag_math(f"{m.group(1)}^{{{m.group(2)}}}")),
         # x != 0, x ̸= 0
         (r"\b([a-zA-Z])\s*(?:!=|̸=)\s*(\d+)\b", lambda m: tag_math(f"{m.group(1)} \\neq {m.group(2)}")),
     ]
 
     tagged = text
     for pat, repl in patterns:
-        tagged = re.sub(pat, repl, tagged)
+        parts = re.split(r"(\x01[^\x02]*\x02)", tagged)
+        for i in range(0, len(parts), 2):
+            parts[i] = re.sub(pat, repl, parts[i])
+        tagged = "".join(parts)
 
     parts = re.split(r"\x01([^\x02]+)\x02", tagged)
     runs: list[RunType] = []

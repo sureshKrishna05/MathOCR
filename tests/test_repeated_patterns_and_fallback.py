@@ -153,6 +153,72 @@ def test_inline_math_splitting_in_layout_lines() -> None:
     assert any("A_{ij}" in eq for eq in mat_latexs)
 
 
+def test_phase6_required_inline_mathematics_expressions() -> None:
+    """Verify all mandatory Phase 6 inline mathematical test expressions.
+
+    Ensures preservation of:
+    - x^{-1}
+    - x_i
+    - x^2
+    - A_{ij} and A_{ji}
+    - x_1 + x_2 = 0
+    - mixed prose + inline fraction + suffix prose
+    - paragraph with multiple inline mathematical spans
+    - Greek symbols and physical relations (p = h/lambda, θ_i = θ_r)
+    """
+    from backend.document import _split_text_with_inline_math
+
+    # 1. Inverse power x^{-1}
+    runs_inv = _split_text_with_inline_math("Let x^{-1} be the multiplicative inverse.")
+    assert len(runs_inv) == 3
+    assert isinstance(runs_inv[1], InlineEquation)
+    assert runs_inv[1].latex == "x^{-1}"
+    assert runs_inv[0].text == "Let "
+    assert runs_inv[2].text == " be the multiplicative inverse."
+
+    # 2. Subscript x_i and power x^2
+    runs_sub_pow = _split_text_with_inline_math("For index x_i, the square is x^2.")
+    eqs = [r for r in runs_sub_pow if isinstance(r, InlineEquation)]
+    assert len(eqs) == 2
+    assert eqs[0].latex == "x_{i}"
+    assert eqs[1].latex == "x^{2}"
+
+    # 3. Matrix indices and transposition
+    runs_trans = _split_text_with_inline_math("Symmetric matrix satisfies A_ij = A_ji identically.")
+    eqs_trans = [r for r in runs_trans if isinstance(r, InlineEquation)]
+    assert len(eqs_trans) == 1
+    assert eqs_trans[0].latex == "A_{ij} = A_{ji}"
+
+    # 4. Linear equation x_1 + x_2 = 0
+    runs_lin = _split_text_with_inline_math("We consider the homogeneous system where x_1 + x_2 = 0.")
+    eqs_lin = [r for r in runs_lin if isinstance(r, InlineEquation)]
+    assert len(eqs_lin) == 1
+    assert eqs_lin[0].latex == "x_{1} + x_{2} = 0"
+
+    # 5. Mixed prose + inline fraction + suffix prose
+    runs_frac = _split_text_with_inline_math("Evaluating the reciprocal 1/x for all non-zero x.")
+    assert any(isinstance(r, InlineEquation) and r.latex == "1/x" for r in runs_frac)
+    assert any(isinstance(r, TextRun) and "Evaluating the reciprocal " in r.text for r in runs_frac)
+    assert any(isinstance(r, TextRun) and " for all non-zero x." in r.text for r in runs_frac)
+
+    # 6. Paragraph with multiple inline mathematical spans
+    para_text = "Given x_i != 0 with x^{-1}, then x x^{-1} = 1 and x^2 > 0."
+    runs_multi = _split_text_with_inline_math(para_text)
+    eqs_multi = [r for r in runs_multi if isinstance(r, InlineEquation)]
+    assert len(eqs_multi) >= 3
+    multi_latex = [e.latex for e in eqs_multi]
+    assert any("x_{i}" in l or "x \\neq 0" in l for l in multi_latex)
+    assert any("x^{-1}" in l for l in multi_latex)
+    assert any("x^{2}" in l for l in multi_latex)
+
+    # 7. Physical relations and Greek letters
+    runs_phys = _split_text_with_inline_math("The de Broglie relation p = h/lambda and angle θ_i = θ_r.")
+    eqs_phys = [r for r in runs_phys if isinstance(r, InlineEquation)]
+    assert len(eqs_phys) == 2
+    assert eqs_phys[0].latex == r"p = h/\lambda"
+    assert eqs_phys[1].latex == r"\theta_{i} = \theta_{r}"
+
+
 def test_markdown_reconciliation_preserves_inline_equation_metadata() -> None:
     """Markdown reconciliation preserves InlineEquation asset_id, confidence, and box."""
     initial_p = Paragraph(
@@ -510,4 +576,32 @@ def test_api_export_docx_with_document_and_threshold(tmp_path: Path) -> None:
     # Both numbering labels present
     assert "(1)" in xml
     assert "(2)" in xml
+
+
+def test_table_source_image_fallback(tmp_path: Path) -> None:
+    """When a table cannot be reliably reconstructed, it falls back to its source crop as an image."""
+    from backend.document import Table
+
+    img = Image.new("RGB", (250, 100), color=(235, 240, 245))
+    asset = default_asset_store.store_image(img, mime_type="image/png")
+
+    doc = Document(
+        elements=[
+            Paragraph(runs=[TextRun(text="Below is an unrecoverable table:")]),
+            Table(
+                rows=[],
+                asset_id=asset.asset_id,
+                fallback_image=True,
+                box=(50, 100, 300, 200),
+            ),
+        ]
+    )
+    output = tmp_path / "table_fallback.docx"
+    warnings = build_docx_from_document(doc, output)
+
+    assert output.is_file()
+    media = _read_docx_media_files(output)
+    assert len(media) == 1
+    assert any("Table structure could not be reliably recovered" in w for w in warnings)
+
 
