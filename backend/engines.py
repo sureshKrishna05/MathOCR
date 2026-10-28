@@ -1529,6 +1529,8 @@ class MathPipeline:
             figures=figures,
             table_cell_rects=table_cell_rects,
             page_number=page_num,
+            page_source=page_source,
+            asset_store=getattr(page_source, "asset_store", None),
         )
         document_audit = dict(audit or {})
         document_audit["kept_text_lines"] = [

@@ -484,6 +484,7 @@ class Document:
     elements: list[BlockElement] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    audit_records: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -491,6 +492,7 @@ class Document:
             "elements": [elem.to_dict() for elem in self.elements],
             "metadata": self.metadata,
             "warnings": self.warnings,
+            "audit_records": self.audit_records,
         }
 
     @classmethod
@@ -517,6 +519,7 @@ class Document:
             elements=elements,
             metadata=dict(data.get("metadata", {})),
             warnings=list(data.get("warnings", [])),
+            audit_records=list(data.get("audit_records", [])),
         )
 
     def to_markdown(self) -> str:
@@ -806,6 +809,8 @@ class Document:
         figures: list[Any] | None = None,  # list of ExtractedFigure
         table_cell_rects: list[Box] | None = None,
         page_number: int = 1,
+        page_source: Any | None = None,
+        asset_store: Any | None = None,
     ) -> Document:
         """Construct structured Document from OCR geometry, detecting tables, math, and figures."""
         from backend.layout import (
@@ -1148,7 +1153,22 @@ class Document:
 
             row_idx += 1
 
-        return cls(title=title, elements=_merge_continuation_paragraphs(elements, med_h), metadata=metadata)
+        merged_elements = _merge_continuation_paragraphs(elements, med_h)
+        doc = cls(title=title, elements=merged_elements, metadata=metadata)
+        try:
+            from backend.audit import audit_document_content
+
+            doc, _ = audit_document_content(
+                doc,
+                page_source=page_source,
+                kept_text=text_lines,
+                math_results=math_results,
+                asset_store=asset_store,
+            )
+        except Exception as audit_err:
+            import logging
+            logging.getLogger("mathocr").warning("Document audit encountered an error: %s", audit_err)
+        return doc
 
 
 def reconcile_document_with_markdown(doc: Document, markdown: str) -> Document:

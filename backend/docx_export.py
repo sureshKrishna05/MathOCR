@@ -403,6 +403,16 @@ def build_docx_from_document(
     validation_warnings = verify_docx_file(output)
     warnings.extend(validation_warnings)
 
+    try:
+        from backend.audit import validate_docx_structure
+
+        docx_audit_records = validate_docx_structure(output, expected_doc=document)
+        for rec in docx_audit_records:
+            if rec.severity in ("medium", "high"):
+                warnings.append(f"DOCX audit warning: {rec.reason}")
+    except Exception as val_err:
+        logger.warning("DOCX structure audit error: %s", val_err)
+
     return warnings
 
 
@@ -659,6 +669,12 @@ def _add_paragraph(
             r.italic = run.italic
             r.underline = run.underline
             _apply_run_background(r, run.background_color)
+            if run.text and (run.text.startswith(" ") or run.text.endswith(" ")):
+                try:
+                    t_elem = r._r.get_or_add_t()
+                    t_elem.set(qn("xml:space"), "preserve")
+                except Exception:
+                    pass
         elif isinstance(run, InlineEquation):
             _append_inline_equation(
                 p, run, warnings, pandoc_path, config=config, asset_store=asset_store, stats=stats

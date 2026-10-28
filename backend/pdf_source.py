@@ -49,6 +49,7 @@ class PageSource:
     table_cell_rects: list[Box] = field(default_factory=list)  # Table border/cell boxes in px
     digital_text_lines: list[dict[str, Any]] = field(default_factory=list)
     is_scanned: bool = False
+    asset_store: AssetStore | None = None
 
     @property
     def width_px(self) -> int:
@@ -259,6 +260,7 @@ def extract_pdf_pages(
                 figures=figures,
                 table_cell_rects=table_cell_rects,
                 is_scanned=is_scanned,
+                asset_store=store,
             )
             page_sources.append(page_source)
 

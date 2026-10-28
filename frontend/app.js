@@ -968,6 +968,76 @@ function renderDocuments() {
       state.documents[index].markdown = editor.value;
       renderMarkdownPreview(editor.value, preview);
     });
+
+    if (doc.audit_records && doc.audit_records.length > 0) {
+      const auditDetails = document.createElement("details");
+      auditDetails.className = "document-audit-panel";
+      const autoCount = doc.audit_records.filter((r) => r.action === "auto_correct").length;
+      const reviewCount = doc.audit_records.filter((r) => r.action !== "auto_correct").length;
+
+      const summary = document.createElement("summary");
+      summary.className = "document-audit-summary";
+      summary.textContent = `Quality & Content Audit: ${autoCount} repaired automatically, ${reviewCount} review items`;
+      auditDetails.append(summary);
+
+      const auditList = document.createElement("div");
+      auditList.className = "document-audit-list";
+
+      doc.audit_records.forEach((rec) => {
+        const item = document.createElement("div");
+        item.className = `audit-item audit-severity-${rec.severity || "medium"}`;
+
+        const header = document.createElement("div");
+        header.className = "audit-item-header";
+
+        const typeBadge = document.createElement("span");
+        typeBadge.className = "audit-badge audit-type";
+        typeBadge.textContent = rec.issue_type;
+        header.append(typeBadge);
+
+        const actionBadge = document.createElement("span");
+        actionBadge.className = `audit-badge audit-action-${rec.action}`;
+        actionBadge.textContent = rec.action === "auto_correct" ? "Repaired" : (rec.action || "Review");
+        header.append(actionBadge);
+
+        if (rec.confidence) {
+          const confSpan = document.createElement("span");
+          confSpan.className = "audit-conf";
+          confSpan.textContent = `conf: ${rec.confidence}`;
+          header.append(confSpan);
+        }
+
+        item.append(header);
+
+        const body = document.createElement("div");
+        body.className = "audit-item-body";
+
+        if (rec.reason) {
+          const reasonDiv = document.createElement("div");
+          reasonDiv.className = "audit-reason";
+          reasonDiv.textContent = rec.reason;
+          body.append(reasonDiv);
+        }
+
+        if (rec.proposed_text) {
+          const propDiv = document.createElement("div");
+          propDiv.className = "audit-proposed";
+          const propLabel = document.createElement("strong");
+          propLabel.textContent = "Correction: ";
+          const propCode = document.createElement("code");
+          propCode.textContent = rec.proposed_text;
+          propDiv.append(propLabel, propCode);
+          body.append(propDiv);
+        }
+
+        item.append(body);
+        auditList.append(item);
+      });
+
+      auditDetails.append(auditList);
+      card.append(auditDetails);
+    }
+
     list.append(card);
   });
   elements.documentSection.scrollIntoView({ behavior: "smooth", block: "start" });

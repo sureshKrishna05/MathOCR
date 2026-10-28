@@ -191,6 +191,23 @@ class DocumentResult(BaseModel):
     page: int | None = None
     markdown: str
     document: dict[str, Any] | None = None
+    audit_records: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AuditRequest(BaseModel):
+    """Request payload to audit document content or inspect DOCX structure."""
+
+    document: dict[str, Any] | None = Field(default=None)
+    markdown: str | None = Field(default=None, max_length=200_000)
+    docx_path: str | None = Field(default=None)
+    confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+
+
+class AuditResponse(BaseModel):
+    """Structured audit findings identifying hallucinations, boundary errors, or missing assets."""
+
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    summary: dict[str, int] = Field(default_factory=dict)
 
 
 class OcrResponse(BaseModel):
@@ -447,12 +464,18 @@ def recognize_file(
                 )
             if outcome.markdown:
                 doc_dict = outcome.document.to_dict() if outcome.document else None
+                doc_audit = (
+                    outcome.document.audit_records
+                    if outcome.document and hasattr(outcome.document, "audit_records")
+                    else []
+                )
                 documents.append(
                     DocumentResult(
                         source=filename,
                         page=page_ref,
                         markdown=outcome.markdown,
                         document=doc_dict,
+                        audit_records=doc_audit,
                     )
                 )
             if mode == "document" and not outcome.text_available:
@@ -1053,6 +1076,44 @@ def get_asset(asset_id: str) -> Response:
         media_type=asset.mime_type,
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@app.post("/api/audit", response_model=AuditResponse)
+async def audit_content(request: AuditRequest) -> AuditResponse:
+    """Inspect reconstructed document content or a generated DOCX for hallucinations and boundary defects."""
+    from backend.audit import audit_document_content, validate_docx_structure
+
+    records: list[dict[str, Any]] = []
+
+    if request.docx_path and os.path.isfile(request.docx_path):
+        docx_records = await run_in_threadpool(validate_docx_structure, request.docx_path)
+        records.extend([r.to_dict() for r in docx_records])
+
+    if request.document:
+        doc = Document.from_dict(request.document)
+        doc, doc_records = await run_in_threadpool(
+            audit_document_content,
+            doc,
+            asset_store=default_asset_store,
+            confidence_threshold=request.confidence_threshold,
+        )
+        records.extend([r.to_dict() for r in doc_records])
+    elif request.markdown and request.markdown.strip():
+        doc = Document.from_markdown(request.markdown)
+        doc, doc_records = await run_in_threadpool(
+            audit_document_content,
+            doc,
+            asset_store=default_asset_store,
+            confidence_threshold=request.confidence_threshold,
+        )
+        records.extend([r.to_dict() for r in doc_records])
+
+    summary: dict[str, int] = {}
+    for r in records:
+        itype = r.get("issue_type", "unknown")
+        summary[itype] = summary.get(itype, 0) + 1
+
+    return AuditResponse(records=records, summary=summary)
 
 
 # Mount last so /api routes win. This makes one Uvicorn process sufficient locally,
